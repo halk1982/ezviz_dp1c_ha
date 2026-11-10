@@ -106,6 +106,27 @@ def camera_key(api, options):
         raise
 
 
+def cached_camera_key(api, options, path):
+    """Cache only the resolved device key, tied to this account/region/device."""
+    if not options.get("decrypt_video", True):
+        return None
+    identity = hashlib.sha256((options["account"] + "@" + options["api_host"] + "/" + options["serial"]).encode()).hexdigest()
+    if not options.get("camera_key") and path.exists():
+        saved = json.loads(path.read_text())
+        if saved.get("identity") == identity and saved.get("key"):
+            print("INFO: using privately cached camera key", flush=True)
+            return saved["key"]
+    key = camera_key(api, options)
+    if not key:
+        raise ValueError("Camera encryption key unavailable")
+    temp = path.with_suffix(".tmp")
+    fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as output:
+        json.dump({"identity": identity, "key": key}, output)
+    os.replace(temp, path)
+    return key
+
+
 def failure_hint(stage, error):
     if type(error).__name__ == "EzvizAuthVerificationCode":
         if stage == "camera_key":
@@ -124,7 +145,7 @@ def failure_hint(stage, error):
 def worker():
     os.umask(0o077)
     logging.disable(logging.CRITICAL)
-    print("PROBE: version=0.1.2", flush=True)
+    print("PROBE: version=0.2.0", flush=True)
     stage = "configuration"
     clip = Path("/media/ezviz_dp1c_probe/live-test.ts")
     api = None
@@ -143,7 +164,7 @@ def worker():
         stage = "camera_key"
         print("STAGE: camera_key", flush=True)
         try:
-            key = camera_key(api, options)
+            key = cached_camera_key(api, options, Path("/data/camera_key.json"))
         finally:
             # A key request may refresh the session before requesting a challenge.
             persist_session(api, token_path, identity)
@@ -173,6 +194,10 @@ def worker():
 
 
 def main():
+    options = json.loads(Path("/data/options.json").read_text())
+    if options.get("mode", "probe") == "live":
+        from live import run
+        return run(options)
     # Bound API startup, media capture and decoder subprocesses together. Kill the
     # entire worker process group on timeout or Supervisor stop (including FFmpeg).
     process = subprocess.Popen([sys.executable, __file__, "--worker"], start_new_session=True)

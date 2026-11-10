@@ -115,3 +115,18 @@ def test_diagnostic_client_records_only_codes(monkeypatch):
     assert client.last_operation == "camera_key"
     assert client.last_codes == {"resultCode": "1234"}
     client._session.close()
+
+
+def test_camera_key_cache_is_private_and_bound_to_device(tmp_path):
+    api = Mock()
+    api.get_cam_key.return_value = "fake-key"
+    options = {"account": "test", "api_host": "apiieu.ezvizlife.com", "serial": "first"}
+    path = tmp_path / "camera_key.json"
+    assert probe.cached_camera_key(api, options, path) == "fake-key"
+    assert path.stat().st_mode & 0o777 == 0o600
+    api.reset_mock()
+    assert probe.cached_camera_key(api, options, path) == "fake-key"
+    api.get_cam_key.assert_not_called()
+    options["serial"] = "second"
+    probe.cached_camera_key(api, options, path)
+    api.get_cam_key.assert_called_once_with("second", smscode=None)

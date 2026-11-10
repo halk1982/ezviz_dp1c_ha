@@ -1,3 +1,12 @@
+# 0.2.0
+
+- Add `mode: live` with an authenticated `/live.ts` endpoint for Generic Camera.
+- Share one on-demand cloud producer across up to four consumers; close it when idle.
+- Bound media buffering, connection duration and authentication retries.
+- Cache the resolved camera key privately to avoid repeated email-code requests.
+- Preserve `mode: probe` and the existing add-on slug/configuration.
+- Live output is video only. Physical-camera sustained playback remains experimental.
+
 # 0.1.2
 
 - Explicitly request the DEVICE_ENCRYPTION verification challenge when camera-key access requires it and no code is supplied.

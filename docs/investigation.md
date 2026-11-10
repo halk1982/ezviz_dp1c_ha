@@ -120,3 +120,38 @@ identifiers, email addresses, key material and tokens are excluded. This address
 a missing request step; it is not a confirmed diagnosis of the user's server error.
 Regression suite: 25 tests passed, including challenge request selection, no new
 challenge during code submission, leading-zero preservation and diagnostic redaction.
+
+## Successful physical probe and live-mode implementation (0.2.0)
+
+The user supplied a new probe log showing successful login/session reuse, camera
+key retrieval, cloud capture and video decode, followed by:
+`PASS: {"codec": "h264", "width": 1088, "height": 720, "decoded_frames": 5}`.
+This is user-reported runtime evidence of a successful short capture on their DP1C;
+we did not receive or inspect the footage. It does not establish sustained streaming.
+
+Version 0.2.0 adds a live mode to the same add-on. The implementation uses the pinned
+library's `open_cloud_stream`, `_BufferedStreamPayloadDecryptor` and stream remux
+helper. The encrypted-header setting matches the successful capture's default
+`nalu_header_size=0`. It exposes a Basic-authenticated MPEG-TS HTTP endpoint, shares
+one producer, limits viewers and buffers, stops idle producers and blocks automatic
+retries after a verification challenge. Camera keys are cached privately.
+
+Home Assistant's current Generic Camera source was inspected: `stream_source()`
+adds configured username/password to the source URL, and `use_stream_for_stills`
+is enabled when the still-image URL is empty. Sources:
+https://github.com/home-assistant/core/blob/dev/homeassistant/components/generic/camera.py
+https://github.com/home-assistant/core/blob/dev/homeassistant/components/generic/config_flow.py
+These are source observations, not validation in the user's HA version.
+
+Local validation includes AES-decrypted synthetic NALs split across seven-byte
+chunks, credential rejection before producer start, shared producer lifecycle,
+viewer limits, bounded memory, authentication-retry blocking, and key-cache isolation.
+An actual HTTP/FFmpeg container test decoded five frames for each of two simultaneous
+viewers of synthetic video, rejected an unauthenticated request, and confirmed the
+producer stopped after disconnection. No EZVIZ credentials were used locally.
+Actual continuous cloud decryption, startup latency, wake behavior, battery use and
+Home Assistant playback still require the user's next live-mode test.
+
+Release validation: 36 unit tests passed. After the final lifecycle adjustment,
+all 10 live-mode tests passed again and the real HTTP/FFmpeg smoke test passed
+against the rebuilt amd64 image. No physical-camera live-mode run was performed here.

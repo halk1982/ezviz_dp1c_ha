@@ -2,10 +2,16 @@
 
 ## Start here: live video
 
-If your RenierM26 HACS integration already provides motion and snapshots, **keep it**.
-Install **EZVIZ DP1C Cloud Video Probe** from this repository to test the missing
-cloud live-video path. The probe captures a short private clip, checks that frames
-decode, and stops. It does not yet create a live camera entity.
+Keep your RenierM26 HACS integration for working motion and snapshots. This
+repository's **EZVIZ DP1C Cloud Video** add-on provides two modes:
+
+- `probe`: a short private capture and video-decode check, then stop.
+- `live`: an experimental authenticated, on-demand MPEG-TS endpoint for Home
+  Assistant's **Generic Camera** integration, with one shared cloud connection.
+
+A user reported the probe successfully decoded their DP1C's cloud video as
+**H.264, 1088 × 720**. Sustained live-mode compatibility is still being validated.
+It does not use the legacy Internet Explorer player or local RTSP.
 
 In Home Assistant OS, go to **Settings → Add-ons → Add-on Store → ⋮ → Repositories**
 and add:
@@ -14,10 +20,11 @@ and add:
 https://github.com/halk1982/ezviz_dp1c_ha
 ```
 
-Refresh the store, select **EZVIZ DP1C Cloud Video Probe**, install it, and follow
-[its configuration and test instructions](dp1c_video_probe/DOCS.md). Enter credentials
-only in the local add-on configuration. Share the sanitized PASS/FAIL line afterward.
-A successful Docker build is not proof of DP1C or Supervisor compatibility.
+Install **EZVIZ DP1C Cloud Video**, or update your existing **Cloud Video Probe**
+installation to **0.2.0** (same slug; configuration retained). Follow the
+[live-view setup instructions](dp1c_video_probe/DOCS.md) to enable live mode and add
+Generic Camera. The add-on does not create a camera entity automatically.
+Credentials stay in your local configuration. Never upload them or footage here.
 
 ## Earlier snapshot/event prototype
 

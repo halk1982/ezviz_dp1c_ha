@@ -4,3 +4,6 @@ __pycache__/
 *.pyc
 options.json
 token.json
+session.json
+camera_key.json
+live_auth.json
