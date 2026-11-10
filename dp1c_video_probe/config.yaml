@@ -1,5 +1,5 @@
 name: EZVIZ DP1C Cloud Video
-version: 0.2.0
+version: 0.2.1
 slug: ezviz_dp1c_video_probe
 description: Experimental on-demand cloud live video, with a separate capture-test mode
 url: https://github.com/halk1982/ezviz_dp1c_ha

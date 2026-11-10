@@ -155,3 +155,43 @@ Home Assistant playback still require the user's next live-mode test.
 Release validation: 36 unit tests passed. After the final lifecycle adjustment,
 all 10 live-mode tests passed again and the real HTTP/FFmpeg smoke test passed
 against the rebuilt amd64 image. No physical-camera live-mode run was performed here.
+
+## Live-preview stall investigation (0.2.1)
+
+The user reported successful live-server startup followed by two generic producer
+stop messages, while Generic Camera displayed "Stream never started". A comparison
+immediately after opening and closing the official app's live view still failed.
+The user confirmed that the device-encryption email code was entered in the correct
+`camera_verification_code` field. Neither sleep nor incorrect code placement was
+established as the cause.
+
+A deterministic regression test failed on 0.2.0: two encrypted video PES packets with
+fresh NALs and no audio/non-video PES produced zero output until flush. The upstream
+buffer helper retains a trailing video PES run until a non-video packet or EOF;
+metadata/pack headers do not end the run. This is a confirmed software defect in the
+chosen live pipeline, independent of the physical camera's state. It is a candidate
+explanation for the user's symptom, not yet verified against their actual packets.
+
+The fix adds conservative boundaries at complete video PES packets whose payloads
+start a fresh Annex B NAL, with encrypted-header plausibility checks. Continuations
+and split AES blocks remain buffered together; the pinned library still performs
+media decryption. The 8 MiB cap remains. FFmpeg startup buffering and output reads
+are reduced. Safe diagnostics now identify connection phases, byte counters,
+remux result categories, exit codes and stop reasons. No raw responses or media are
+logged, and no speculative wake/sleep device API calls were added.
+
+A new network-disabled container regression generates H.264, encrypts synthetic NAL
+prefixes, wraps video-only MPEG-PS with timestamps, splits it into cloud-like packet
+bodies, and exercises the actual live producer, authenticated HTTP endpoint and a
+real FFmpeg decoder. It checks five frames arrive before the source ends. The
+synthetic fixture uses block-padded short NALs to make the pinned library's encrypted
+header detector unambiguous, verifies equality with bounded whole-capture decryption,
+and does not represent an observed DP1C packet trace. That test passed. Unit tests
+also cover cross-PES continuations, video-only emission before EOF, and redaction of
+private error payloads. Physical sustained playback and automatic wake-up remain
+unverified until the user tests the updated version.
+
+Release validation: all 39 unit tests passed. The rebuilt amd64 image passed the
+full encrypted-media producer/HTTP/FFmpeg test with five decoded frames delivered
+before the synthetic source ended. The physical DP1C's behavior on 0.2.1 remains
+pending. The existing Generic Camera settings and private caches are preserved.

@@ -145,7 +145,7 @@ def failure_hint(stage, error):
 def worker():
     os.umask(0o077)
     logging.disable(logging.CRITICAL)
-    print("PROBE: version=0.2.0", flush=True)
+    print("PROBE: version=0.2.1", flush=True)
     stage = "configuration"
     clip = Path("/media/ezviz_dp1c_probe/live-test.ts")
     api = None

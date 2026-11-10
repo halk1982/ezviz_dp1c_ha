@@ -15,12 +15,11 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from pyezvizapi.client import EzvizClient
 from pyezvizapi.exceptions import EzvizAuthVerificationCode
 from pyezvizapi.cloud_stream import open_cloud_stream
-from pyezvizapi.__main__ import _BufferedStreamPayloadDecryptor, _copy_stream_payloads_to_mpegts
+from media import BoundedDecryptor, remux_stream
 
-from probe import authenticate, cached_camera_key, failure_hint, persist_session
+from probe import DiagnosticClient, authenticate, cached_camera_key, failure_hint, persist_session
 
 END = None
 
@@ -33,48 +32,49 @@ def kill_group(process):
     process.wait()
 
 
-class BoundedDecryptor(_BufferedStreamPayloadDecryptor):
-    """Bound buffering while preserving upstream cross-packet NAL handling."""
-    def __call__(self, data):
-        if len(self._buffer) + len(data) > 8 * 1024 * 1024:
-            raise ValueError("Media decryption buffer limit exceeded")
-        return super().__call__(data)
-
-
-def produce():
+def produce(options_path=Path("/data/options.json"), auth_path=Path("/data/live_auth.json"),
+            output=None, open_stream=open_cloud_stream, client_factory=DiagnosticClient):
     """Binary stdout only. Credentials are read from a private file, not argv."""
     os.umask(0o077)
     logging.disable(logging.CRITICAL)
-    stage = "cloud_open"
+    stage = "configuration"
+    api = None
+
+    def emit(message):
+        print(message, file=sys.stderr, flush=True)
+
     try:
-        options = json.loads(Path("/data/options.json").read_text())
-        auth = json.loads(Path("/data/live_auth.json").read_text())
-        api = EzvizClient(options["account"], options["password"], token=auth["token"], timeout=15)
-        with open_cloud_stream(api, options["serial"], timeout=15) as stream:
-            stream.start()
+        options = json.loads(options_path.read_text())
+        auth = json.loads(auth_path.read_text())
+        api = client_factory(options["account"], options["password"], token=auth["token"], timeout=15)
+        stage = "cloud_metadata"
+        emit("LIVE_STAGE: cloud_metadata")
+        stream = open_stream(api, options["serial"], timeout=15)
+        stage = "cloud_connect"
+        emit("LIVE_STAGE: cloud_connect")
+        with stream:
+            stage = "stream_start"
+            emit("LIVE_STAGE: stream_start")
+            info = stream.start()
+            result = getattr(info, "result", None)
+            if type(result) is int and abs(result) <= 999999:
+                emit(f"LIVE_CLOUD: stream_result={result}")
             # Save any token refreshed during cloud negotiation for the next view.
-            persist_session(api, Path("/data/session.json"), auth["identity"])
+            persist_session(api, auth_path.parent / "session.json", auth["identity"])
             auth["token"] = api.export_token()
-            temp = Path("/data/live_auth.tmp")
+            temp = auth_path.with_suffix(".tmp")
             fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-            with os.fdopen(fd, "w") as output:
-                json.dump(auth, output)
-            os.replace(temp, "/data/live_auth.json")
+            with os.fdopen(fd, "w") as saved:
+                json.dump(auth, saved)
+            os.replace(temp, auth_path)
             stage = "live_remux"
-            transform = BoundedDecryptor(auth["key"], codec="encrypted-header") if auth["key"] else None
-            # Match the successful probe's nalu_header_size=0. Audio is omitted in
-            # this first live version; no video re-encoding is performed.
-            process = subprocess.Popen([
-                "ffmpeg", "-hide_banner", "-loglevel", "error", "-f", "mpeg", "-i", "pipe:0",
-                "-map", "0:v:0", "-c:v", "copy", "-an", "-mpegts_flags", "resend_headers",
-                "-flush_packets", "1", "-f", "mpegts", "pipe:1"
-            ], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-            _copy_stream_payloads_to_mpegts(stream, sys.stdout.buffer, process=process,
-                max_packets=None, duration_seconds=options.get("max_view_seconds", 300),
-                allow_encrypted=False, transform_payload=transform)
+            remux_stream(stream, output if output is not None else sys.stdout.buffer,
+                         key=auth["key"], max_seconds=options.get("max_view_seconds", 300), emit=emit)
         return 0
     except Exception as error:
-        print(f"LIVE_FAIL: stage={stage} error_class={type(error).__name__}", file=sys.stderr, flush=True)
+        emit(f"LIVE_FAIL: stage={stage} error_class={type(error).__name__}")
+        if api is not None and api.last_codes:
+            emit("LIVE_API_CODES: operation=" + api.last_operation + " " + json.dumps(api.last_codes))
         return 20 if isinstance(error, EzvizAuthVerificationCode) else 1
 
 
@@ -133,16 +133,24 @@ class Hub:
     def _pump(self, process):
         started = last_data = time.monotonic()
         failed = False
+        reason = "source_eof"
+        byte_count = 0
         try:
             while True:
                 now = time.monotonic()
                 with self.lock:
-                    if self.closed or (not self.viewers and now - self.last_detach >= self.idle_seconds):
+                    if self.closed:
+                        reason = "server_shutdown"
+                        break
+                    if not self.viewers and now - self.last_detach >= self.idle_seconds:
+                        reason = "no_viewers"
                         break
                 if now - started >= self.max_seconds:
+                    reason = "view_duration_limit"
                     break
                 if now - last_data > self.startup_seconds:
                     failed = True
+                    reason = "media_timeout"
                     print("LIVE_FAIL: stage=media_timeout", flush=True)
                     break
                 readable, _, _ = select.select([process.stdout], [], [], 0.5)
@@ -160,6 +168,7 @@ class Hub:
                     except subprocess.TimeoutExpired:
                         pass
                     break
+                byte_count += len(chunk)
                 last_data = time.monotonic()
                 with self.lock:
                     had_viewers = bool(self.viewers)
@@ -173,6 +182,7 @@ class Hub:
                         self.last_detach = last_data
         except Exception as error:
             failed = True
+            reason = "relay_error"
             print(f"LIVE_FAIL: stage=relay error_class={type(error).__name__}", flush=True)
         finally:
             kill_group(process)
@@ -184,7 +194,7 @@ class Hub:
                 self.process = None
                 if failed:
                     self.cooldown = time.monotonic() + 60
-            print("LIVE: cloud producer stopped", flush=True)
+            print(f"LIVE_STOP: reason={reason} ts_bytes={byte_count} exit_code={process.returncode}", flush=True)
 
     def close(self):
         with self.lock:
@@ -215,6 +225,7 @@ def handler_for(hub, username, password):
             channel = None
             try:
                 channel = hub.subscribe()
+                print("LIVE_HTTP: authenticated viewer attached", flush=True)
                 first = channel.get(timeout=50)
                 if first is END:
                     self.send_error(503, "Cloud stream unavailable; check add-on log")
@@ -224,6 +235,7 @@ def handler_for(hub, username, password):
                 self.send_header("Cache-Control", "no-store")
                 self.send_header("Connection", "close")
                 self.end_headers()
+                print("LIVE_HTTP: delivering_mpegts", flush=True)
                 self.wfile.write(first)
                 self.wfile.flush()
                 while True:
@@ -234,8 +246,10 @@ def handler_for(hub, username, password):
                     self.wfile.flush()
             except RuntimeError:
                 self.send_error(503, "Stream busy or cooling down")
-            except (queue.Empty, OSError):
-                pass
+            except queue.Empty:
+                print("LIVE_HTTP: media_wait_timeout", flush=True)
+            except OSError:
+                print("LIVE_HTTP: viewer_disconnected", flush=True)
             finally:
                 if channel is not None:
                     hub.unsubscribe(channel)
@@ -256,7 +270,7 @@ def validate_options(options):
 def run(options):
     os.umask(0o077)
     logging.disable(logging.CRITICAL)
-    print("LIVE: version=0.2.0", flush=True)
+    print("LIVE: version=0.2.1", flush=True)
     stage = "live_configuration"
     auth_path = Path("/data/live_auth.json")
     try:

@@ -21,7 +21,7 @@ https://github.com/halk1982/ezviz_dp1c_ha
 ```
 
 Install **EZVIZ DP1C Cloud Video**, or update your existing **Cloud Video Probe**
-installation to **0.2.0** (same slug; configuration retained). Follow the
+installation to **0.2.1** (same slug; configuration retained). Follow the
 [live-view setup instructions](dp1c_video_probe/DOCS.md) to enable live mode and add
 Generic Camera. The add-on does not create a camera entity automatically.
 Credentials stay in your local configuration. Never upload them or footage here.
@@ -126,3 +126,13 @@ docker run --rm --network none -e PYTHONPATH=/app \
 ```
 
 This generates synthetic video and tests the real decoder; it does not contact EZVIZ.
+
+The encrypted-media regression also exercises the actual producer and decryptor:
+
+```sh
+docker run --rm --network none -e PYTHONPATH=/app \
+  -v "$PWD/tests/encrypted_media_smoke.py:/test/encrypted_media_smoke.py:ro" \
+  ezviz-dp1c-probe:test python /test/encrypted_media_smoke.py
+```
+
+It generates and encrypts synthetic video locally. No EZVIZ account is contacted.

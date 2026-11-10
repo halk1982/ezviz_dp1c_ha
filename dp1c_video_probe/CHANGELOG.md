@@ -1,3 +1,11 @@
+# 0.2.1
+
+- Fix a reproduced live-video stall for encrypted video-only MPEG-PS input: release complete NAL runs before stream end while preserving PES/AES continuations.
+- Reduce FFmpeg startup buffering and forward available TS output immediately.
+- Report cloud connection stages, aggregate media byte counts, safe FFmpeg error categories, process exit codes and explicit stop reasons.
+- Preserve existing sessions, camera-key caches, credentials and live-mode configuration.
+- Add a full encrypted H.264 producer-to-HTTP-to-decoder regression test. No new wake-up command is claimed.
+
 # 0.2.0
 
 - Add `mode: live` with an authenticated `/live.ts` endpoint for Generic Camera.

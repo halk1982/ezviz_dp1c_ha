@@ -1,12 +1,12 @@
 # EZVIZ DP1C Cloud Video
 
-Version 0.2.0 adds experimental **live mode** to the same add-on that ran the
+Version 0.2.1 fixes live-video startup buffering; version 0.2.0 introduced **live mode** to the same add-on that ran the
 successful capture test. The slug remains `ezviz_dp1c_video_probe`; update the
 existing installation to keep your configuration and private session.
 
 ## Live mode: next step after a successful probe
 
-1. Update the existing add-on to **0.2.0**. Keep RenierM26's HACS integration for
+1. Update the existing add-on to **0.2.1**. Keep RenierM26's HACS integration for
    motion and alarm images. MQTT and another EZVIZ integration are not required.
 2. In the add-on Configuration set:
 
@@ -107,3 +107,35 @@ reopening a view does not require another camera-code request.
 
 Do not disable account security. If a code is rejected, share the FAIL and numeric
 API_CODES lines rather than repeatedly requesting or submitting codes.
+
+## Updating a stalled 0.2.0 live preview
+
+Update the existing add-on to **0.2.1**, restart it with the same settings, wait for
+`LIVE: ready`, then retry the Generic Camera preview once. Keep the saved session,
+camera key and stream credentials. You do not need to request a new email code just
+to update; use the documented verification flow only if an explicit challenge occurs.
+
+Version 0.2.0 could buffer video-only encrypted input until stream end because its
+upstream decryptor waited for a non-video PES packet. This differs from probe mode,
+which flushes at the end of a bounded clip. The new version also reduces FFmpeg
+startup buffering and reads available output without waiting for 64 KiB.
+
+If preview still fails, share the new `LIVE_STAGE`, `LIVE_CLOUD`, `LIVE_MEDIA`,
+`LIVE_REMUX`, `LIVE_FAIL` and `LIVE_STOP` lines. These contain stage names, aggregate
+byte counts, numeric status/exit codes and fixed diagnostic categories only. Raw
+FFmpeg messages, URLs, cloud responses, video bytes, keys and tokens are excluded.
+`LIVE_STOP` now identifies normal idle shutdown, duration limits, source end and
+media timeout instead of only saying that the producer stopped.
+
+## Sleep and wake behavior
+
+The add-on initiates a normal authenticated VTM cloud live-view request when a viewer
+connects. It has **no separately implemented or verified DP1C wake-up command**.
+Whether that normal request wakes a sleeping DP1C still requires a physical test.
+The optional library function to delay battery-device sleep is not used: its device
+compatibility and operation parameters have not been verified for this camera.
+
+The user's preview also failed immediately after viewing through the official app,
+so sleep has not been established as the cause of the reported preview failure.
+A successful probe proves a short capture, not live wake-up behavior. First verify
+live playback while awake, then test again after the camera has been idle.

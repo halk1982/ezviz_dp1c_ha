@@ -102,3 +102,63 @@ def test_auth_failure_does_not_request_codes_repeatedly():
     with pytest.raises(RuntimeError):
         hub.subscribe()
     hub.close()
+
+
+def test_video_only_stream_emits_before_close():
+    key = "test-only-key"
+    cipher = AES.new(key.encode().ljust(16, b"\0"), AES.MODE_ECB)
+
+    def packet(nal):
+        payload = b"\x00\x00\x00\x01" + cipher.encrypt(nal)
+        return b"\x00\x00\x01\xe0" + (len(payload) + 3).to_bytes(2, "big") + b"\x80\x00\x00" + payload
+
+    nal1 = b"\x65" + bytes(range(1, 64))
+    nal2 = b"\x41" + bytes(range(1, 64))
+    decryptor = BoundedDecryptor(key, codec="encrypted-header")
+    first = packet(nal1)
+    second = packet(nal2)
+    output = decryptor(first) + decryptor(second)
+    assert output, "video-only stream was buffered until close instead of producing live output"
+    complete = output + decryptor.flush()
+    assert complete == first[:9] + b"\x00\x00\x00\x01" + nal1 + second[:9] + b"\x00\x00\x00\x01" + nal2
+
+
+def test_video_nal_continuation_across_pes_is_preserved():
+    key = "test-only-key"
+    cipher = AES.new(key.encode().ljust(16, b"\0"), AES.MODE_ECB)
+    nal = b"\x65" + bytes(range(1, 128))
+    next_nal = b"\x41" + bytes(range(1, 64))
+
+    def pes(payload):
+        return b"\0\0\1\xe0" + (len(payload) + 3).to_bytes(2, "big") + b"\x80\x00\0" + payload
+
+    encrypted = b"\0\0\0\1" + cipher.encrypt(nal)
+    pieces = [encrypted[:17], encrypted[17:51], encrypted[51:]]
+    expected_pieces = [b"\0\0\0\1" + nal[:13], nal[13:47], nal[47:]]
+    last = pes(b"\0\0\0\1" + cipher.encrypt(next_nal))
+    encoded = b"".join(pes(piece) for piece in pieces) + last
+    expected = b"".join(pes(piece) for piece in expected_pieces) + pes(b"\0\0\0\1" + next_nal)
+    decryptor = BoundedDecryptor(key, codec="encrypted-header")
+    decoded = b"".join(decryptor(encoded[i:i+11]) for i in range(0, len(encoded), 11)) + decryptor.flush()
+    assert decoded == expected
+
+
+def test_producer_error_reports_stage_without_private_payload(tmp_path, capsys):
+    import json
+    from types import SimpleNamespace
+    from live import produce
+
+    options = tmp_path / "options.json"
+    auth = tmp_path / "live_auth.json"
+    options.write_text(json.dumps({"account": "fake", "password": "PRIVATE_PASSWORD", "serial": "PRIVATE_SERIAL"}))
+    auth.write_text(json.dumps({"token": {"session_id": "PRIVATE_SESSION"}, "key": "PRIVATE_KEY"}))
+    client = SimpleNamespace(last_codes={}, last_operation="none")
+
+    def failed_open(*args, **kwargs):
+        raise ValueError("PRIVATE_SERVER_RESPONSE")
+
+    assert produce(options, auth, open_stream=failed_open, client_factory=lambda *args, **kwargs: client) == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "LIVE_FAIL: stage=cloud_metadata error_class=ValueError" in captured.err
+    assert "PRIVATE" not in captured.err
