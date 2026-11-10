@@ -1,17 +1,19 @@
 # EZVIZ DP1C Cloud Video
 
-Version 0.2.1 fixes live-video startup buffering; version 0.2.0 introduced **live mode** to the same add-on that ran the
-successful capture test. The slug remains `ezviz_dp1c_video_probe`; update the
+Version 0.2.2 adds local media checks and an optional compatibility encoder; version 0.2.0 introduced **live mode** to the same add-on that ran the
+initial capture test. A decode PASS does not establish correct picture quality. The slug remains `ezviz_dp1c_video_probe`; update the
 existing installation to keep your configuration and private session.
 
 ## Live mode: next step after a successful probe
 
-1. Update the existing add-on to **0.2.1**. Keep RenierM26's HACS integration for
+1. Update the existing add-on to **0.2.2**. Keep RenierM26's HACS integration for
    motion and alarm images. MQTT and another EZVIZ integration are not required.
 2. In the add-on Configuration set:
 
    ```yaml
    mode: live
+   decrypt_mode: auto
+   video_mode: copy
    stream_username: dp1c
    stream_password: "CHOOSE_A_NEW_RANDOM_PASSWORD"
    max_view_seconds: 300
@@ -66,8 +68,10 @@ secured access to view the camera remotely.
   refresh, or recorder can keep/reopen the stream and drain the camera battery.
 - A producer is limited to `max_view_seconds` (default 300, range 30–900). Clients may
   reconnect after it ends. This is intended for short views, not continuous recording.
-- This first live version sends **video only**, preserving the camera's H.264 without
-  transcoding. Audio and two-way talk are not implemented.
+- Output is **video only**. `video_mode: copy` preserves encoded H.264 with minimal
+  CPU use. `video_mode: compatible` decodes and re-encodes as 10 fps Baseline H.264,
+  with no B-frames, a timeline starting at zero and repeated headers/keyframes.
+  Compatible mode uses more CPU. Audio and two-way talk are not implemented.
 - The upstream incremental decryptor is used with the same encrypted-header setting
   as the successful probe. Its private helpers are pinned to pyezvizapi 1.0.5.0.
   Buffering is bounded at 8 MiB. Sustained DP1C playback still needs user validation.
@@ -110,7 +114,7 @@ API_CODES lines rather than repeatedly requesting or submitting codes.
 
 ## Updating a stalled 0.2.0 live preview
 
-Update the existing add-on to **0.2.1**, restart it with the same settings, wait for
+Update the existing add-on to **0.2.2**, restart it with the same settings, wait for
 `LIVE: ready`, then retry the Generic Camera preview once. Keep the saved session,
 camera key and stream credentials. You do not need to request a new email code just
 to update; use the documented verification flow only if an explicit challenge occurs.
@@ -139,3 +143,65 @@ The user's preview also failed immediately after viewing through the official ap
 so sleep has not been established as the cause of the reported preview failure.
 A successful probe proves a short capture, not live wake-up behavior. First verify
 live playback while awake, then test again after the camera has been idle.
+
+## "Error with media stream contents" in Generic Camera
+
+Continuous `LIVE_MEDIA` byte counters prove media transfer, not successful decoding.
+The frontend's HLS player displays this message for a media error; a matching Core
+log entry is not guaranteed. A custom card's JavaScript error is separate evidence
+and does not establish the cause of the video failure.
+
+For the next attempt, update to **0.2.2**, keep `mode: live`, and select:
+
+```yaml
+decrypt_mode: auto
+video_mode: compatible
+```
+
+Keep the same account, stream credentials and Generic Camera configuration. Restart,
+wait for `LIVE: ready`, and retry preview once. This is a compatibility fallback,
+not a confirmed diagnosis of the physical camera's media error. It rebuilds video
+headers/keyframes rather than directly copying the original bitstream.
+
+After about five seconds of media, the add-on runs bounded local checks and emits:
+
+- `LIVE_CHECK`: codec/dimensions/profile, five-frame decode result, keyframe count,
+  and aggregate missing/non-increasing timestamp counts and maximum timestamp gap.
+- `LIVE_DECRYPT_CHECK`: whether the incremental plaintext equals the pinned
+  library's whole-capture decryption for the same bounded input prefix.
+- `LIVE_MEDIA ... ffmpeg_flags=...`: fixed, allowlisted FFmpeg error categories.
+
+Share those result lines if it still fails. The checks run once per producer on
+private, bounded in-memory samples, with no retained media files or upload. Raw
+FFmpeg errors, media bytes, image/video hashes, URLs and keys are not logged.
+They add a small amount of temporary CPU work; compatible mode additionally uses
+ongoing CPU for encoding. This version has been tested with synthetic media and
+PyAV/fMP4 remuxing locally, not on the user's physical camera yet.
+
+### Decryption formats and picture quality
+
+Earlier versions forced encrypted NAL headers (`header_bytes=0`). This was inferred
+from the library's default, not verified against the camera's actual picture. The
+reported grey clip means that assumption needs checking. `decrypt_mode: auto` now
+uses the pinned library's detector to select clear/encrypted H.264/HEVC headers and
+prints `LIVE_DECRYPT_MODE`. It is heuristic detection, not proof of a correct image.
+The explicit modes remain available for a later controlled test if needed.
+
+`LIVE_CHECK` explicitly reports `visual_quality: not_assessed`. Five decoded frames
+can still be grey, concealed or visually incorrect. Transcoding also cannot repair
+incorrectly decrypted source data. The user's visual playback result remains
+necessary. A decryption-comparison result of `different` is not an automatic verdict:
+our clear-header synthetic fixture reproduces an upstream whole-capture edge case
+while the incremental result matches known plaintext and decodes correctly.
+
+### Nonzero cloud stream-start result (including 5405)
+
+A nonzero `LIVE_CLOUD: stream_result` is a refusal from the VTM stream service, even
+if a previous metadata API response had `meta_code: 200`. Version 0.2.2 stops before
+starting FFmpeg and pauses new producer requests for 120 seconds. The meaning of
+5405 is not established by the inspected library; it is not labelled as sleep,
+wrong credentials, or a specific session limit.
+
+Close other live viewers and pause before one new attempt. Do not repeatedly
+restart or request new verification codes in response to 5405. If it persists,
+share the stream-result/start-failure lines; decode checks cannot run without media.

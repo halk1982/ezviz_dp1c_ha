@@ -1,3 +1,14 @@
+# 0.2.2
+
+- Select NAL header decryption mode automatically instead of forcing encrypted headers; log the selected header size. Explicit modes remain available.
+- Fail immediately on nonzero VTM stream-start results and apply a 120-second producer cooldown; do not assign an unverified meaning to 5405.
+
+- Add optional `video_mode: compatible`: Baseline H.264 at 10 fps with regular keyframes, repeated headers, no B-frames and a rebased output timeline. Default remains `copy`.
+- Once per producer, check a bounded local sample for five decodable frames, codec/profile, keyframes and timestamp anomalies.
+- Compare incremental decryption with whole-capture decryption of the same private input prefix.
+- Show fixed FFmpeg error categories during streaming; exclude raw responses, metadata, URLs, credentials and media from logs.
+- Add a targeted PyAV/fMP4 compatibility test for both output modes. Physical-camera media error remains under investigation.
+
 # 0.2.1
 
 - Fix a reproduced live-video stall for encrypted video-only MPEG-PS input: release complete NAL runs before stream end while preserving PES/AES continuations.

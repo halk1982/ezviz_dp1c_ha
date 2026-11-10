@@ -162,3 +162,66 @@ def test_producer_error_reports_stage_without_private_payload(tmp_path, capsys):
     assert captured.out == ""
     assert "LIVE_FAIL: stage=cloud_metadata error_class=ValueError" in captured.err
     assert "PRIVATE" not in captured.err
+
+
+def test_nonzero_cloud_result_never_reaches_decoder(tmp_path, capsys, monkeypatch):
+    import io
+    import json
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from live import produce
+
+    options = tmp_path / "options.json"
+    auth = tmp_path / "live_auth.json"
+    options.write_text(json.dumps({"account": "fake", "password": "fake", "serial": "fake"}))
+    auth.write_text(json.dumps({"token": {}, "key": "fake", "identity": "fake"}))
+    api = SimpleNamespace(last_codes={"meta_code": "200"}, last_operation="other")
+    stream = Mock()
+    stream.__enter__ = Mock(return_value=stream)
+    stream.__exit__ = Mock(return_value=False)
+    stream.start.return_value = SimpleNamespace(result=5405)
+    decoder = Mock()
+    monkeypatch.setattr("live.remux_stream", decoder)
+    assert produce(options, auth, output=io.BytesIO(), open_stream=lambda *a, **k: stream,
+                   client_factory=lambda *a, **k: api) == 21
+    decoder.assert_not_called()
+    captured = capsys.readouterr()
+    assert "stream_result=5405" in captured.err
+    assert "stage=stream_start error_class=StreamStartRejected" in captured.err
+    assert "LIVE_API_CODES" not in captured.err
+    assert captured.out == ""
+
+
+def test_cloud_rejection_cooldown_prevents_immediate_reconnect():
+    hub = Hub([sys.executable, "-c", "raise SystemExit(21)"])
+    channel = hub.subscribe()
+    assert channel.get(timeout=5) is END
+    hub.thread.join(timeout=3)
+    assert hub.cooldown - time.monotonic() > 110
+    assert not hub.auth_blocked
+    with pytest.raises(RuntimeError):
+        hub.subscribe()
+    hub.close()
+
+
+def test_auto_decryption_preserves_clear_h264_header():
+    key = "test-only-key"
+    cipher = AES.new(key.encode().ljust(16, b"\0"), AES.MODE_ECB)
+    plain1 = b"\x65" + bytes(range(1, 65))
+    plain2 = b"\x41" + bytes(range(1, 65))
+
+    def packet(nal, encrypted):
+        payload = b"\0\0\0\1" + (nal[:1] + cipher.encrypt(nal[1:]) if encrypted else nal)
+        return b"\0\0\1\xe0" + (len(payload) + 3).to_bytes(2, "big") + b"\x80\0\0" + payload
+
+    decryptor = BoundedDecryptor(key, codec="auto")
+    output = decryptor(packet(plain1, True)) + decryptor(packet(plain2, True)) + decryptor.flush()
+    assert decryptor._nalu_header_size == 1
+    assert output == packet(plain1, False) + packet(plain2, False)
+
+
+def test_auto_does_not_lock_on_a_short_clear_aud():
+    decryptor = BoundedDecryptor("test-only-key", codec="auto")
+    aud = b"\0\0\1\xe0\0\x09\x80\0\0\0\0\0\1\x09\xf0"
+    assert decryptor(aud) == b""
+    assert decryptor._nalu_header_size is None

@@ -9,8 +9,10 @@ repository's **EZVIZ DP1C Cloud Video** add-on provides two modes:
 - `live`: an experimental authenticated, on-demand MPEG-TS endpoint for Home
   Assistant's **Generic Camera** integration, with one shared cloud connection.
 
-A user reported the probe successfully decoded their DP1C's cloud video as
-**H.264, 1088 × 720**. Sustained live-mode compatibility is still being validated.
+The probe identified **H.264, 1088 × 720** and returned decoded frames, but the
+user then reported a mostly grey image with occasional normal video. **Usable
+picture quality and sustained playback remain unresolved.** A decoder PASS is not
+proof that the image is correct.
 It does not use the legacy Internet Explorer player or local RTSP.
 
 In Home Assistant OS, go to **Settings → Add-ons → Add-on Store → ⋮ → Repositories**
@@ -21,9 +23,12 @@ https://github.com/halk1982/ezviz_dp1c_ha
 ```
 
 Install **EZVIZ DP1C Cloud Video**, or update your existing **Cloud Video Probe**
-installation to **0.2.1** (same slug; configuration retained). Follow the
+installation to **0.2.2** (same slug; configuration retained). Follow the
 [live-view setup instructions](dp1c_video_probe/DOCS.md) to enable live mode and add
 Generic Camera. The add-on does not create a camera entity automatically.
+If the Generic Camera browser preview reports media-content errors, version 0.2.2
+adds `video_mode: compatible` and local, privacy-preserving decode/timestamp checks.
+Compatible mode uses more CPU; the default `copy` mode preserves the camera bitstream.
 Credentials stay in your local configuration. Never upload them or footage here.
 
 ## Earlier snapshot/event prototype
@@ -136,3 +141,13 @@ docker run --rm --network none -e PYTHONPATH=/app \
 ```
 
 It generates and encrypts synthetic video locally. No EZVIZ account is contacted.
+
+For the targeted Home Assistant media-library compatibility check:
+
+```sh
+.venv/bin/pip install av==19.0.0
+.venv/bin/python tests/pyav_smoke.py
+```
+
+This checks both video output modes with PyAV and fragmented MP4 settings from
+current Home Assistant source; it does not run Home Assistant or a real camera.

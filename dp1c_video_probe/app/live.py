@@ -24,6 +24,10 @@ from probe import DiagnosticClient, authenticate, cached_camera_key, failure_hin
 END = None
 
 
+class StreamStartRejected(ValueError):
+    """The VTM service returned a nonzero stream-start result."""
+
+
 def kill_group(process):
     try:
         os.killpg(process.pid, signal.SIGKILL)
@@ -59,6 +63,8 @@ def produce(options_path=Path("/data/options.json"), auth_path=Path("/data/live_
             result = getattr(info, "result", None)
             if type(result) is int and abs(result) <= 999999:
                 emit(f"LIVE_CLOUD: stream_result={result}")
+                if result != 0:
+                    raise StreamStartRejected()
             # Save any token refreshed during cloud negotiation for the next view.
             persist_session(api, auth_path.parent / "session.json", auth["identity"])
             auth["token"] = api.export_token()
@@ -69,12 +75,16 @@ def produce(options_path=Path("/data/options.json"), auth_path=Path("/data/live_
             os.replace(temp, auth_path)
             stage = "live_remux"
             remux_stream(stream, output if output is not None else sys.stdout.buffer,
-                         key=auth["key"], max_seconds=options.get("max_view_seconds", 300), emit=emit)
+                         key=auth["key"], max_seconds=options.get("max_view_seconds", 300), emit=emit,
+                         video_mode=options.get("video_mode", "copy"),
+                         decrypt_mode=options.get("decrypt_mode", "auto"))
         return 0
     except Exception as error:
         emit(f"LIVE_FAIL: stage={stage} error_class={type(error).__name__}")
-        if api is not None and api.last_codes:
+        if api is not None and api.last_codes and not isinstance(error, StreamStartRejected):
             emit("LIVE_API_CODES: operation=" + api.last_operation + " " + json.dumps(api.last_codes))
+        if isinstance(error, StreamStartRejected):
+            return 21
         return 20 if isinstance(error, EzvizAuthVerificationCode) else 1
 
 
@@ -134,6 +144,7 @@ class Hub:
         started = last_data = time.monotonic()
         failed = False
         reason = "source_eof"
+        cooldown_seconds = 60
         byte_count = 0
         try:
             while True:
@@ -165,6 +176,10 @@ class Hub:
                             with self.lock:
                                 self.auth_blocked = True
                             print("LIVE: authentication needs attention; restart after resolving the challenge", flush=True)
+                        elif result == 21:
+                            reason = "cloud_start_rejected"
+                            cooldown_seconds = 120
+                            print("LIVE: cloud start rejected; pausing new attempts for 120 seconds", flush=True)
                     except subprocess.TimeoutExpired:
                         pass
                     break
@@ -193,7 +208,7 @@ class Hub:
                 self.viewers.clear()
                 self.process = None
                 if failed:
-                    self.cooldown = time.monotonic() + 60
+                    self.cooldown = time.monotonic() + cooldown_seconds
             print(f"LIVE_STOP: reason={reason} ts_bytes={byte_count} exit_code={process.returncode}", flush=True)
 
     def close(self):
@@ -259,6 +274,10 @@ def handler_for(hub, username, password):
 
 
 def validate_options(options):
+    if options.get("decrypt_mode", "auto") not in {"auto", "encrypted-header", "h264-clear-header", "hevc"}:
+        raise ValueError("Unsupported decrypt_mode")
+    if options.get("video_mode", "copy") not in {"copy", "compatible"}:
+        raise ValueError("video_mode must be copy or compatible")
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,32}", options.get("stream_username", "")):
         raise ValueError("Set a URL-safe stream_username")
     if not re.fullmatch(r"[A-Za-z0-9_-]{16,128}", options.get("stream_password", "")):
@@ -270,7 +289,7 @@ def validate_options(options):
 def run(options):
     os.umask(0o077)
     logging.disable(logging.CRITICAL)
-    print("LIVE: version=0.2.1", flush=True)
+    print("LIVE: version=0.2.2", flush=True)
     stage = "live_configuration"
     auth_path = Path("/data/live_auth.json")
     try:

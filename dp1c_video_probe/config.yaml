@@ -1,5 +1,5 @@
 name: EZVIZ DP1C Cloud Video
-version: 0.2.1
+version: 0.2.2
 slug: ezviz_dp1c_video_probe
 description: Experimental on-demand cloud live video, with a separate capture-test mode
 url: https://github.com/halk1982/ezviz_dp1c_ha
@@ -17,6 +17,8 @@ ports_description:
   8558/tcp: Authenticated local MPEG-TS video
 options:
   mode: probe
+  video_mode: copy
+  decrypt_mode: auto
   stream_username: dp1c
   stream_password: ""
   max_view_seconds: 300
@@ -30,6 +32,8 @@ options:
   decrypt_video: true
 schema:
   mode: list(probe|live)
+  video_mode: list(copy|compatible)
+  decrypt_mode: list(auto|encrypted-header|h264-clear-header|hevc)
   stream_username: str
   stream_password: password
   max_view_seconds: int(30,900)

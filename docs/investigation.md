@@ -195,3 +195,67 @@ Release validation: all 39 unit tests passed. The rebuilt amd64 image passed the
 full encrypted-media producer/HTTP/FFmpeg test with five decoded frames delivered
 before the synthetic source ended. The physical DP1C's behavior on 0.2.1 remains
 pending. The existing Generic Camera settings and private caches are preserved.
+
+## Continuous transport but frontend media error (0.2.2)
+
+User logs from 0.2.1 showed a successful VTM start (`stream_result=0`), continuous
+cloud input and MPEG-TS output for approximately thirty seconds, and small pending
+decryption buffers. Generic Camera's browser preview reported "Error with media
+stream contents". This establishes active media transport, not correct decryption,
+decodable frames, valid timestamps, browser compatibility or sustained playback.
+
+The supplied Core log excerpt did not contain a stream-worker error. It contained
+a duplicate custom-element registration error from a custom camera card. No raw
+user logs or private identifiers from that excerpt are retained here. That frontend
+error does not establish why the stream failed.
+
+The current frontend source in `src/components/ha-hls-player.ts` maps fatal Hls.js
+MEDIA_ERROR to the exact displayed message; that path need not create a matching
+Core error. Source: https://github.com/home-assistant/frontend/blob/dev/src/components/ha-hls-player.ts
+The current Core stream worker's timestamp validation and MP4 options were inspected.
+Its manifest pins av 19.0.0. A local synthetic-media test used that PyAV version to
+validate timestamps, remux into fragmented MP4 using the worker's options and decode
+five frames. Both copy and newly implemented compatible output modes passed. This
+is a targeted media-library check, not a complete Home Assistant/browser test.
+
+Version 0.2.2 adds bounded in-memory checks on the user's own host: strict five-frame
+TS decode and allowlisted stream metadata/timestamp summaries, plus an equality
+comparison between incremental and whole-capture decryption of a bounded prefix.
+Raw video, response messages, timestamps, secrets and URLs are not logged/uploaded.
+It also adds an optional Baseline H.264/10 fps compatibility encoder with regular
+keyframes and repeated headers; the default remains stream copy. No specific cause
+of the user's media error is yet confirmed, and this release is not claimed as a
+verified fix for that physical camera. The user-side result is still required.
+
+Further user evidence: VLC also showed grey video, and the original downloaded
+clip was reported mostly grey with only a possible brief normal image at the end.
+The initial probe's five returned frames were therefore insufficient evidence of
+usable video. README/DOCS now distinguish technical decode results from picture
+quality. It is not established that the problem is only in Home Assistant's frontend.
+
+A later run returned VTM stream result 5405 and zero packets; that is a distinct
+stream-start rejection, not the earlier active-but-grey media case. No mapping for
+5405 was found in the inspected package. The producer now stops before decoding
+for any nonzero result and backs off for 120 seconds. A metadata success code is
+not reported as though it established stream success. No access control is bypassed.
+
+Versions through 0.2.1 forced NAL header size zero based on a library default. With
+picture quality now disputed, 0.2.2 uses the pinned library's automatic detector and
+logs the selected header length. Both clear and encrypted H.264-header variants
+are tested against known synthetic plaintext. A clear-header, high-bitrate synthetic
+fixture also reproduces an upstream whole-capture heuristic defect after a large
+VCL run; the incremental result matches the known plaintext. That expected upstream
+defect is asserted explicitly, alongside the plaintext and actual-decoder assertions.
+A whole/incremental comparison difference alone is therefore not an oracle for which
+path is wrong. Four PyAV/fMP4 cases (two header modes × two video modes) passed.
+Neither format selection nor compatibility encoding has yet been validated against
+the user's physical DP1C picture. Media checks explicitly mark visual quality as
+not assessed and do not claim to detect a normal scene from a grey image.
+
+Release validation: 50 unit tests passed. The clear/encrypted header variants both
+passed the copy and compatible-output PyAV/fMP4 checks, including real five-frame
+decoding. The auto detector waits for a representative prefix (eight complete video
+PES packets or 16 KiB) rather than locking onto a single short clear AUD. The rebuilt
+amd64 container also passed the full encrypted-media HTTP/decoder smoke test.
+All new media data used here was synthetic. The user's physical picture and the
+service's 5405 result remain pending a controlled user-side test after publication.

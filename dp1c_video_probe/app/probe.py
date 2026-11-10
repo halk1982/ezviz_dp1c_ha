@@ -145,7 +145,7 @@ def failure_hint(stage, error):
 def worker():
     os.umask(0o077)
     logging.disable(logging.CRITICAL)
-    print("PROBE: version=0.2.1", flush=True)
+    print("PROBE: version=0.2.2", flush=True)
     stage = "configuration"
     clip = Path("/media/ezviz_dp1c_probe/live-test.ts")
     api = None
@@ -175,11 +175,13 @@ def worker():
             duration_seconds=10, max_packets=2000, timeout=15,
             decrypt_video=options.get("decrypt_video", True),
             media_key=key,
+            nalu_header_size={"auto": None, "encrypted-header": 0, "h264-clear-header": 1, "hevc": 2}[options.get("decrypt_mode", "auto")],
         )
         stage = "video_decode"
         print("STAGE: video_decode", flush=True)
         summary = validate_clip(clip)
         print("PASS: " + json.dumps(summary), flush=True)
+        print("INFO: this is a decode check; verify picture quality privately in the clip", flush=True)
         print("Private test clip: /media/ezviz_dp1c_probe/live-test.ts", flush=True)
         return 0
     except Exception as error:

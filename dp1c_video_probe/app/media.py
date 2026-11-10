@@ -7,10 +7,12 @@ import threading
 import time
 
 from Crypto.Cipher import AES
+from checks import LocalChecks, error_flags
 from pyezvizapi.__main__ import _BufferedStreamPayloadDecryptor
 from pyezvizapi.stream import (
     _mpeg_ps_complete_packet_ranges,
     _pes_payload_start,
+    detect_hikvision_ps_video_nalu_header_size,
     mpeg_ps_decryptable_prefix_length,
 )
 
@@ -47,6 +49,12 @@ class BoundedDecryptor(_BufferedStreamPayloadDecryptor):
         if not marker:
             return False
         body = payload[marker:]
+        if self._nalu_header_size in (None, 1) and body:
+            if (body[0] & 0x80) == 0 and 1 <= (body[0] & 0x1F) <= 23:
+                return True
+        if self._nalu_header_size in (None, 2) and len(body) >= 2:
+            if (body[0] & 0x80) == 0 and (body[1] & 7) != 0 and ((body[0] >> 1) & 0x3F) <= 40:
+                return True
         # Short, unencrypted H.264 access-unit delimiters are also boundaries.
         if body[:2] == b"\x09\xf0":
             return True
@@ -62,8 +70,20 @@ class BoundedDecryptor(_BufferedStreamPayloadDecryptor):
             raise MediaBufferLimit("Media decryption buffer limit exceeded")
         self._buffer.extend(data)
         self.peak_pending = max(self.peak_pending, len(self._buffer))
+        packets = _mpeg_ps_complete_packet_ranges(self._buffer)
+        if self._nalu_header_size is None:
+            # A short clear AUD alone is not evidence that later VCL headers
+            # are also clear. Inspect a representative prefix before fixing
+            # the mode for the session. All bytes remain buffered, not dropped.
+            video_packets = sum(0xE0 <= packet.stream_id <= 0xEF for packet in packets)
+            if video_packets < 8 and len(self._buffer) < 16384:
+                return b""
+            detected = detect_hikvision_ps_video_nalu_header_size(bytes(self._buffer), self._key, default=None)
+            if detected is None:
+                return b""
+            self._nalu_header_size = detected
         complete_end = mpeg_ps_decryptable_prefix_length(self._buffer)
-        for packet in _mpeg_ps_complete_packet_ranges(self._buffer):
+        for packet in packets:
             if packet.start <= complete_end or not 0xE0 <= packet.stream_id <= 0xEF:
                 continue
             start = _pes_payload_start(self._buffer, packet.start)
@@ -76,16 +96,31 @@ class BoundedDecryptor(_BufferedStreamPayloadDecryptor):
         return self._decrypt_chunk(chunk)
 
 
-def remux_stream(stream, output, *, key, max_seconds, emit=print):
-    """Exercise the real encrypted-media pipeline; do not log media or URLs."""
-    process = subprocess.Popen([
+def ffmpeg_command(video_mode):
+    if video_mode not in {"copy", "compatible"}:
+        raise ValueError("Unsupported video mode")
+    encoding = ["-c:v", "copy"] if video_mode == "copy" else [
+        "-c:v", "libx264", "-preset", "veryfast", "-tune", "zerolatency",
+        "-profile:v", "baseline", "-pix_fmt", "yuv420p", "-vf", "setpts=PTS-STARTPTS",
+        "-r", "10", "-fps_mode", "cfr", "-g", "20", "-keyint_min", "20",
+        "-bf", "0", "-sc_threshold", "0", "-x264-params", "repeat-headers=1",
+    ]
+    return [
         "ffmpeg", "-hide_banner", "-loglevel", "error",
-        "-analyzeduration", "500000", "-probesize", "65536",
-        "-f", "mpeg", "-i", "pipe:0", "-map", "0:v:0", "-c:v", "copy", "-an",
+        "-analyzeduration", "500000", "-probesize", "65536", "-fflags", "+genpts",
+        "-f", "mpeg", "-i", "pipe:0", "-map", "0:v:0", *encoding, "-an",
         "-mpegts_flags", "resend_headers", "-muxdelay", "0", "-muxpreload", "0",
         "-flush_packets", "1", "-f", "mpegts", "pipe:1",
-    ], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    decryptor = BoundedDecryptor(key, codec="encrypted-header") if key else None
+    ]
+
+
+def remux_stream(stream, output, *, key, max_seconds, emit=print, video_mode="copy", decrypt_mode="encrypted-header"):
+    """Exercise the real encrypted-media pipeline; do not log media or URLs."""
+    emit(f"LIVE_VIDEO: mode={video_mode}")
+    process = subprocess.Popen(ffmpeg_command(video_mode), stdin=subprocess.PIPE,
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    decryptor = BoundedDecryptor(key, codec=decrypt_mode) if key else None
+    checks = LocalChecks(key, emit)
     stats = {"packets": 0, "cloud_bytes": 0, "clear_bytes": 0, "ts_bytes": 0}
     errors = []
     flags = set()
@@ -96,7 +131,7 @@ def remux_stream(stream, output, *, key, max_seconds, emit=print):
         pending = len(decryptor._buffer) if decryptor else 0
         peak = decryptor.peak_pending if decryptor else 0
         values = " ".join(f"{name}={value}" for name, value in stats.items())
-        emit(f"LIVE_MEDIA: {values} pending_bytes={pending} peak_pending_bytes={peak}")
+        emit(f"LIVE_MEDIA: {values} pending_bytes={pending} peak_pending_bytes={peak} ffmpeg_flags={','.join(sorted(flags.copy())) or 'none'}")
 
     def read_errors():
         # Classify fixed FFmpeg messages. Never relay its raw stderr/metadata.
@@ -105,11 +140,13 @@ def remux_stream(stream, output, *, key, max_seconds, emit=print):
                  b"non monotonically increasing dts": "non_monotonic_timestamps",
                  b"does not contain any stream": "no_video_track"}
         while line := process.stderr.readline(4096):
+            flags.update(error_flags(line))
             for text, label in known.items():
                 if text in line.lower():
                     flags.add(label)
 
     def write_input():
+        reported_header = False
         try:
             for packet in stream.iter_packets(max_packets=None):
                 if stopped.is_set() or time.monotonic() - started >= max_seconds:
@@ -121,6 +158,11 @@ def remux_stream(stream, output, *, key, max_seconds, emit=print):
                 if stats["packets"] == 1:
                     emit("LIVE_STAGE: receiving_cloud_media")
                 clear = decryptor(packet.body) if decryptor else packet.body
+                header = decryptor._nalu_header_size if decryptor else None
+                if decryptor and header is not None and not reported_header:
+                    emit(f"LIVE_DECRYPT_MODE: mode={decrypt_mode} header_bytes={header}")
+                    reported_header = True
+                checks.decrypted(packet.body, clear, header_size=header)
                 if clear:
                     if not stats["clear_bytes"]:
                         emit("LIVE_STAGE: decrypted_media_ready")
@@ -129,6 +171,7 @@ def remux_stream(stream, output, *, key, max_seconds, emit=print):
                     process.stdin.flush()
             if decryptor and not stopped.is_set():
                 tail = decryptor.flush()
+                checks.decrypted(b"", tail, header_size=decryptor._nalu_header_size)
                 stats["clear_bytes"] += len(tail)
                 process.stdin.write(tail)
         except Exception as error:
@@ -158,6 +201,7 @@ def remux_stream(stream, output, *, key, max_seconds, emit=print):
             if not stats["ts_bytes"]:
                 emit("LIVE_STAGE: mpegts_output_ready")
             stats["ts_bytes"] += len(chunk)
+            checks.output(chunk)
             output.write(chunk)
             output.flush()
         result = process.wait(timeout=2)
@@ -179,6 +223,7 @@ def remux_stream(stream, output, *, key, max_seconds, emit=print):
                 process.wait()
         writer.join(timeout=2)
         stderr_reader.join(timeout=2)
+        checks.finish()
         report()
         emit(f"LIVE_REMUX: exit_code={process.returncode} flags={','.join(sorted(flags)) or 'none'}")
         process.stdout.close()
