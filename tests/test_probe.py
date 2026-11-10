@@ -50,7 +50,7 @@ def test_camera_code_sent_only_to_key_request(tmp_path, monkeypatch):
     api = Mock()
     api.export_token.return_value = {"session_id": "fake-session", "rf_session_id": "fake-refresh"}
     factory = Mock(return_value=api)
-    monkeypatch.setattr(probe, "EzvizClient", factory)
+    monkeypatch.setattr(probe, "DiagnosticClient", factory)
     session = tmp_path / "session.json"
     client, _ = probe.authenticate(options, session)
     probe.camera_key(client, options)
@@ -73,7 +73,7 @@ def test_explicit_camera_key_skips_cloud_key_challenge():
 def test_login_code_is_not_forwarded_to_camera_key(tmp_path, monkeypatch):
     api = Mock()
     api.export_token.return_value = {}
-    monkeypatch.setattr(probe, "EzvizClient", Mock(return_value=api))
+    monkeypatch.setattr(probe, "DiagnosticClient", Mock(return_value=api))
     options = {"account": "test", "password": "fake", "api_host": "apiieu.ezvizlife.com", "verification_code": "123456", "serial": "device"}
     probe.authenticate(options, tmp_path / "session.json")
     probe.camera_key(api, options)
@@ -83,3 +83,35 @@ def test_login_code_is_not_forwarded_to_camera_key(tmp_path, monkeypatch):
 
 def test_failure_hint_never_echoes_private_error():
     assert "private-token" not in probe.failure_hint("login", Exception("private-token"))
+
+
+def test_requests_operation_specific_challenge_only_without_code():
+    api = Mock()
+    api.get_cam_key.side_effect = probe.EzvizAuthVerificationCode("private response")
+    options = {"serial": "device", "account": "account", "camera_verification_code": ""}
+    with pytest.raises(probe.EzvizAuthVerificationCode):
+        probe.camera_key(api, options)
+    api.get_2fa_check_code.assert_called_once_with(biz_type="DEVICE_ENCRYPTION", username="account")
+    api.reset_mock()
+    options["camera_verification_code"] = " 001234 "
+    with pytest.raises(probe.EzvizAuthVerificationCode):
+        probe.camera_key(api, options)
+    api.get_cam_key.assert_called_once_with("device", smscode="001234")
+    api.get_2fa_check_code.assert_not_called()
+
+
+def test_numeric_codes_discard_all_sensitive_fields():
+    payload = {"resultCode": "20002", "retcode": -1, "meta": {"code": 400, "message": "secret", "token": "private"}, "sessionId": "secret", "encryptkey": "secret", "email": "private"}
+    assert probe.numeric_codes(payload) == {"resultCode": "20002", "retcode": "-1", "meta_code": "400"}
+    assert probe.numeric_codes({"resultCode": "secret", "retcode": True, "meta": {"code": "1234567890"}}) == {}
+    assert probe.numeric_codes("private") == {}
+
+
+def test_diagnostic_client_records_only_codes(monkeypatch):
+    response = {"resultCode": "1234", "encryptkey": "PRIVATE", "resultDes": "PRIVATE"}
+    monkeypatch.setattr(probe.EzvizClient, "_request_json", Mock(return_value=response))
+    client = probe.DiagnosticClient("test", "fake")
+    assert client._request_json("POST", "/api/device/query/encryptkey") is response
+    assert client.last_operation == "camera_key"
+    assert client.last_codes == {"resultCode": "1234"}
+    client._session.close()

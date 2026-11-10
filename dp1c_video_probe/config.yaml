@@ -1,5 +1,5 @@
 name: EZVIZ DP1C Cloud Video Probe
-version: 0.1.1
+version: 0.1.2
 slug: ezviz_dp1c_video_probe
 description: One-shot experimental cloud live-video compatibility test; stops after testing
 url: https://github.com/halk1982/ezviz_dp1c_ha

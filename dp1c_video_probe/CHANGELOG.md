@@ -1,3 +1,9 @@
+# 0.1.2
+
+- Explicitly request the DEVICE_ENCRYPTION verification challenge when camera-key access requires it and no code is supplied.
+- Preserve the session after a challenge request; do not request a new code while submitting an existing code.
+- Add allowlisted numeric API status diagnostics without exposing response bodies or credentials.
+
 # 0.1.1
 
 - Separate account-login verification (`verification_code`) from camera-key access verification (`camera_verification_code`).

@@ -10,6 +10,38 @@ import subprocess
 import sys
 
 from pyezvizapi.client import EzvizClient
+from pyezvizapi.exceptions import EzvizAuthVerificationCode
+
+
+def numeric_codes(payload):
+    """Allowlist numeric status fields only; never stringify an API response."""
+    if not isinstance(payload, dict):
+        return {}
+    meta = payload.get("meta")
+    fields = {"resultCode": payload.get("resultCode"), "retcode": payload.get("retcode"),
+              "meta_code": meta.get("code") if isinstance(meta, dict) else None}
+    return {key: str(value) for key, value in fields.items()
+            if type(value) in (int, str) and re.fullmatch(r"-?[0-9]{1,6}", str(value))}
+
+
+class DiagnosticClient(EzvizClient):
+    """Observe structured results from the pinned library without logging secrets."""
+    def __init__(self, *args, **kwargs):
+        self.last_codes = {}
+        self.last_operation = "none"
+        super().__init__(*args, **kwargs)
+
+    def _request_json(self, method, path, *args, **kwargs):
+        self.last_codes = {}
+        operation = {
+            "/api/device/query/encryptkey": "camera_key",
+            "/v3/users/checkcode/mt": "camera_code_request",
+        }.get(path, "other")
+        self.last_operation = operation
+        result = super()._request_json(method, path, *args, **kwargs)
+        self.last_operation = operation
+        self.last_codes = numeric_codes(result)
+        return result
 
 
 def validate_clip(path):
@@ -40,7 +72,7 @@ def authenticate(options, token_path):
     # An explicitly supplied login code starts a fresh login challenge response.
     if login_code:
         token = None
-    api = EzvizClient(options["account"], options["password"], url=options["api_host"], timeout=15, token=token)
+    api = DiagnosticClient(options["account"], options["password"], url=options["api_host"], timeout=15, token=token)
     if not token:
         api.login(sms_code=int(login_code) if login_code else None)
     else:
@@ -62,7 +94,16 @@ def camera_key(api, options):
         return None
     if options.get("camera_key"):
         return options["camera_key"]
-    return api.get_cam_key(options["serial"], smscode=options.get("camera_verification_code") or None)
+    code = (options.get("camera_verification_code") or "").strip()
+    try:
+        return api.get_cam_key(options["serial"], smscode=code or None)
+    except EzvizAuthVerificationCode:
+        if not code:
+            # Request the operation-specific challenge, not TERMINAL_BIND (login).
+            api.get_2fa_check_code(biz_type="DEVICE_ENCRYPTION", username=options["account"])
+            print("INFO: requested camera-encryption verification code; use the new email", flush=True)
+        # A supplied code is never replaced by an automatic request for a new one.
+        raise
 
 
 def failure_hint(stage, error):
@@ -77,14 +118,16 @@ def failure_hint(stage, error):
         "Incorrect Password.": "Check the account password locally.",
         "The user is locked.": "The account is locked; stop retries and resolve this through EZVIZ.",
     }
-    return known.get(str(error), "Share only the FAIL line; do not share credentials or raw API responses.")
+    return known.get(str(error), "Share the FAIL and API_CODES lines, if present; do not share credentials or raw API responses.")
 
 
 def worker():
     os.umask(0o077)
     logging.disable(logging.CRITICAL)
+    print("PROBE: version=0.1.2", flush=True)
     stage = "configuration"
     clip = Path("/media/ezviz_dp1c_probe/live-test.ts")
+    api = None
     try:
         options = json.loads(Path("/data/options.json").read_text())
         if not all(options.get(key) for key in ("account", "password", "serial")):
@@ -99,8 +142,11 @@ def worker():
         api, identity = authenticate(options, token_path)
         stage = "camera_key"
         print("STAGE: camera_key", flush=True)
-        key = camera_key(api, options)
-        persist_session(api, token_path, identity)
+        try:
+            key = camera_key(api, options)
+        finally:
+            # A key request may refresh the session before requesting a challenge.
+            persist_session(api, token_path, identity)
         stage = "cloud_capture"
         print("STAGE: cloud_capture (up to 10 seconds of media)", flush=True)
         api.save_clip(
@@ -118,6 +164,8 @@ def worker():
     except Exception as error:
         # Exception bodies, URLs and serials are intentionally excluded.
         print(f"FAIL: stage={stage} error_class={type(error).__name__}", flush=True)
+        if api is not None and not isinstance(error, EzvizAuthVerificationCode) and api.last_codes:
+            print("API_CODES: operation=" + api.last_operation + " " + json.dumps(api.last_codes), flush=True)
         clip.unlink(missing_ok=True)
         print("HINT: " + failure_hint(stage, error), flush=True)
         print("No validated clip was created. No camera entity is created by this probe.", flush=True)

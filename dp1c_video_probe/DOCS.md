@@ -25,7 +25,7 @@ It is a one-shot experiment, not a working camera entity or permanent video serv
    a 10-second live capture and checks for decodable frames. It stops on completion,
    failure, or a two-minute overall timeout. **Stopped is expected.** Do not enable
    Start on boot or Watchdog. There is no continuous stream yet.
-5. Share only its `PASS` line or `FAIL: stage=... error_class=...` line. Do not post
+5. Share only its `PASS` line or `FAIL: stage=... error_class=...` line, plus any `API_CODES` line. The latter contains only numeric status codes and a fixed operation name. Do not post
    credentials, raw logs from other tools, serial numbers, or video to the public repo.
 
 On success a private clip is available at `/media/ezviz_dp1c_probe/live-test.ts`
@@ -50,11 +50,11 @@ camera entity (for example Generic Camera). Keep the existing HACS integration f
 motion and snapshots. A separate HACS integration is only needed if entity setup or
 camera-specific controls require it.
 
-## Updating from 0.1.0
+## Updating from 0.1.0 or 0.1.1
 
-Refresh the add-on store/repositories and update this add-on to **0.1.1**. The old
+Refresh the add-on store/repositories and update this add-on to **0.1.2**. The old
 version incorrectly sent a code requested during camera-key retrieval to login.
-Clear the old `verification_code` first and run the updated probe once. If it now
+Clear both `verification_code` and `camera_verification_code` first and run the updated probe once. Leave `camera_key` empty unless you know the permanent device encryption key. Version 0.1.2 explicitly requests a code for the DEVICE_ENCRYPTION operation when needed. If it now
 asks at `camera_key`, enter the fresh code in `camera_verification_code` and retry.
 The earlier generic login `PyEzvizError` does not establish that your password is wrong.
 
@@ -64,3 +64,11 @@ A successful probe prints PASS and writes the private clip to
 if the browser cannot play MPEG-TS. There is still no camera entity or live dashboard
 view. On failure, no validated clip is available; partial files are removed. A hard
 timeout may leave a partial file, which must not be treated as a successful capture.
+
+The email contains a temporary access code, not the camera encryption key. After
+`INFO: requested camera-encryption verification code`, enter that **new** email's
+code in `camera_verification_code` promptly, leave `verification_code` blank, and
+restart once. Do not reuse a code from a previous login or verification attempt.
+If it fails again, share the newest PROBE/FAIL/API_CODES lines rather than retrying
+repeatedly. We cannot infer whether a generic PyEzvizError means an invalid code,
+expired code, unsupported endpoint, or another server failure without those codes.

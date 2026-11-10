@@ -102,3 +102,21 @@ stored privately for the next attempt. No real user credentials were used here.
 Regression validation: 22 unit tests passed, including separate code routing,
 leading-zero preservation for camera-access codes, session reuse, and private token
 file permissions. Physical-device verification still requires the user's next run.
+
+## Camera-key challenge follow-up (0.1.2)
+
+User testing of 0.1.1 reached `camera_key / EzvizAuthVerificationCode`, then
+`camera_key / PyEzvizError` with a submitted email code and a reused session.
+The generic error does not identify EZVIZ's response code or establish why the
+request was rejected. Previous versions also did not explicitly request the
+operation-specific challenge. The pinned client's `get_2fa_check_code` documents
+`DEVICE_ENCRYPTION` and `DEVICE_AUTH_CODE` as separate operations from login's
+`TERMINAL_BIND`.
+
+Version 0.1.2 requests `DEVICE_ENCRYPTION` only when camera-key retrieval requires
+verification and no camera code has been supplied. It preserves the updated session
+and adds numeric-only, allowlisted API status diagnostics. Response messages,
+identifiers, email addresses, key material and tokens are excluded. This addresses
+a missing request step; it is not a confirmed diagnosis of the user's server error.
+Regression suite: 25 tests passed, including challenge request selection, no new
+challenge during code submission, leading-zero preservation and diagnostic redaction.
