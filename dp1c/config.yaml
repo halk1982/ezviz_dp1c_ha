@@ -1,0 +1,49 @@
+name: EZVIZ DP1C Cloud Bridge
+version: 0.1.0
+slug: ezviz_dp1c_cloud
+description: Experimental cloud event and alarm snapshot bridge to MQTT
+url: https://github.com/halk1982/ezviz_dp1c_ha
+arch:
+  - aarch64
+  - amd64
+startup: application
+boot: manual
+init: false
+options:
+  account: ""
+  password: ""
+  serial: ""
+  api_host: apiieu.ezvizlife.com
+  verification_code: ""
+  image_key: ""
+  image_hosts:
+    - ezvizlife.com
+  poll_seconds: 60
+  max_event_age: 180
+  motion_codes: []
+  doorbell_codes: []
+  mqtt_host: core-mosquitto
+  mqtt_port: 1883
+  mqtt_username: ""
+  mqtt_password: ""
+  mqtt_tls: false
+schema:
+  account: str
+  password: password
+  serial: str
+  api_host: str
+  verification_code: password
+  image_key: password
+  image_hosts:
+    - str
+  poll_seconds: int(30,3600)
+  max_event_age: int(30,3600)
+  motion_codes:
+    - str
+  doorbell_codes:
+    - str
+  mqtt_host: str
+  mqtt_port: port
+  mqtt_username: str
+  mqtt_password: password
+  mqtt_tls: bool

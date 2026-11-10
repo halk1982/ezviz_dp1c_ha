@@ -1,0 +1,43 @@
+# First live-video test
+
+This is the add-on to test **video**. Keep your existing RenierM26 HACS integration.
+It does not need MQTT, a replacement integration, Internet Explorer, or local RTSP.
+It is a one-shot experiment, not a working camera entity or permanent video server.
+
+1. Configure your EZVIZ account/password and DP1C serial in this add-on's local
+   Configuration tab. Leave the EU API hostname unless your account uses another
+   region. Credentials stay on your Home Assistant host.
+2. `camera_key` is the device verification/encryption key, not your account password.
+   Leave it empty initially: the upstream library attempts to obtain the key through
+   your authenticated account. Keep `decrypt_video: true` for the first test.
+3. If EZVIZ sends a verification challenge, enter the received code in
+   `verification_code` and retry. Other challenge types may require further support.
+   Do not disable account security. Clear a successfully used code before a later test.
+4. Close live view in your phone app, then press **Start** on this add-on. It attempts
+   a 10-second live capture and checks for decodable frames. It stops on completion,
+   failure, or a two-minute overall timeout. **Stopped is expected.** Do not enable
+   Start on boot or Watchdog. There is no continuous stream yet.
+5. Share only its `PASS` line or `FAIL: stage=... error_class=...` line. Do not post
+   credentials, raw logs from other tools, serial numbers, or video to the public repo.
+
+On success a private clip is available at `/media/ezviz_dp1c_probe/live-test.ts`
+(Home Assistant's local media directory). Download/open privately in VLC if useful.
+The next test overwrites it. Delete it when finished; recordings may contain visitors
+and may be included in backups. No files are uploaded to GitHub by this add-on.
+
+This uses `pyezvizapi==1.0.5.0`'s **experimental** cloud VTM implementation. The
+DP1C may need a different protocol or negotiation. A failed test does not establish
+that cloud video is impossible. A successful short capture does not establish a
+stable continuous stream, good audio, browser codec compatibility, or wake behavior.
+
+The prototype logs only stages and exception class names. This protects credentials
+but can leave failures ambiguous; further targeted, locally redacted diagnostics may
+be needed. Do not repeatedly retry authentication failures.
+
+## Intended next stage
+
+If the capture works, implement an on-demand video add-on with a protected local
+stream endpoint and connection limits. Connect that stream to a Home Assistant
+camera entity (for example Generic Camera). Keep the existing HACS integration for
+motion and snapshots. A separate HACS integration is only needed if entity setup or
+camera-specific controls require it.

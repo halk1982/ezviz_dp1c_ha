@@ -1,0 +1,5 @@
+pyezvizapi==1.0.5.0
+paho-mqtt==2.1.0
+requests==2.32.5
+pycryptodome==3.23.0
+xmltodict==1.0.2
