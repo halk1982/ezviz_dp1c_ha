@@ -1,3 +1,11 @@
+# 0.2.3
+
+- Fix the confirmed DP1C grey-picture cause: live video was already clear and local decryption damaged it. Default to `decrypt_video: false`.
+- Default to user-confirmed `video_mode: compatible` for new configurations; preserve existing settings.
+- Skip camera-key requests when decryption is off, even when an old key cache exists. A saved key cannot override the current flag.
+- Explicitly label health checks as encoded-output checks and include observed pipeline errors alongside their result.
+- Add clear-stream passthrough/incorrect-decryption regression coverage and update the known-working setup guide.
+
 # 0.2.2
 
 - Select NAL header decryption mode automatically instead of forcing encrypted headers; log the selected header size. Explicit modes remain available.

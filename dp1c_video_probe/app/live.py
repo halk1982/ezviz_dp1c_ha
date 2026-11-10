@@ -74,9 +74,11 @@ def produce(options_path=Path("/data/options.json"), auth_path=Path("/data/live_
                 json.dump(auth, saved)
             os.replace(temp, auth_path)
             stage = "live_remux"
+            if not options.get("decrypt_video", False):
+                emit("LIVE_DECRYPT_MODE: mode=disabled")
             remux_stream(stream, output if output is not None else sys.stdout.buffer,
-                         key=auth["key"], max_seconds=options.get("max_view_seconds", 300), emit=emit,
-                         video_mode=options.get("video_mode", "copy"),
+                         key=auth["key"] if options.get("decrypt_video", False) else None, max_seconds=options.get("max_view_seconds", 300), emit=emit,
+                         video_mode=options.get("video_mode", "compatible"),
                          decrypt_mode=options.get("decrypt_mode", "auto"))
         return 0
     except Exception as error:
@@ -276,7 +278,7 @@ def handler_for(hub, username, password):
 def validate_options(options):
     if options.get("decrypt_mode", "auto") not in {"auto", "encrypted-header", "h264-clear-header", "hevc"}:
         raise ValueError("Unsupported decrypt_mode")
-    if options.get("video_mode", "copy") not in {"copy", "compatible"}:
+    if options.get("video_mode", "compatible") not in {"copy", "compatible"}:
         raise ValueError("video_mode must be copy or compatible")
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,32}", options.get("stream_username", "")):
         raise ValueError("Set a URL-safe stream_username")
@@ -289,7 +291,7 @@ def validate_options(options):
 def run(options):
     os.umask(0o077)
     logging.disable(logging.CRITICAL)
-    print("LIVE: version=0.2.2", flush=True)
+    print("LIVE: version=0.2.3", flush=True)
     stage = "live_configuration"
     auth_path = Path("/data/live_auth.json")
     try:
@@ -301,7 +303,7 @@ def run(options):
         stage = "camera_key"
         try:
             key = cached_camera_key(api, options, Path("/data/camera_key.json"))
-            if options.get("decrypt_video", True) and not key:
+            if options.get("decrypt_video", False) and not key:
                 raise ValueError("Camera encryption key unavailable")
         finally:
             persist_session(api, Path("/data/session.json"), identity)

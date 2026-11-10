@@ -74,7 +74,7 @@ def test_login_code_is_not_forwarded_to_camera_key(tmp_path, monkeypatch):
     api = Mock()
     api.export_token.return_value = {}
     monkeypatch.setattr(probe, "DiagnosticClient", Mock(return_value=api))
-    options = {"account": "test", "password": "fake", "api_host": "apiieu.ezvizlife.com", "verification_code": "123456", "serial": "device"}
+    options = {"account": "test", "password": "fake", "api_host": "apiieu.ezvizlife.com", "verification_code": "123456", "serial": "device", "decrypt_video": True}
     probe.authenticate(options, tmp_path / "session.json")
     probe.camera_key(api, options)
     api.login.assert_called_once_with(sms_code=123456)
@@ -88,7 +88,7 @@ def test_failure_hint_never_echoes_private_error():
 def test_requests_operation_specific_challenge_only_without_code():
     api = Mock()
     api.get_cam_key.side_effect = probe.EzvizAuthVerificationCode("private response")
-    options = {"serial": "device", "account": "account", "camera_verification_code": ""}
+    options = {"serial": "device", "account": "account", "camera_verification_code": "", "decrypt_video": True}
     with pytest.raises(probe.EzvizAuthVerificationCode):
         probe.camera_key(api, options)
     api.get_2fa_check_code.assert_called_once_with(biz_type="DEVICE_ENCRYPTION", username="account")
@@ -120,7 +120,7 @@ def test_diagnostic_client_records_only_codes(monkeypatch):
 def test_camera_key_cache_is_private_and_bound_to_device(tmp_path):
     api = Mock()
     api.get_cam_key.return_value = "fake-key"
-    options = {"account": "test", "api_host": "apiieu.ezvizlife.com", "serial": "first"}
+    options = {"account": "test", "api_host": "apiieu.ezvizlife.com", "serial": "first", "decrypt_video": True}
     path = tmp_path / "camera_key.json"
     assert probe.cached_camera_key(api, options, path) == "fake-key"
     assert path.stat().st_mode & 0o777 == 0o600
@@ -130,3 +130,14 @@ def test_camera_key_cache_is_private_and_bound_to_device(tmp_path):
     options["serial"] = "second"
     probe.cached_camera_key(api, options, path)
     api.get_cam_key.assert_called_once_with("second", smscode=None)
+
+
+def test_clear_video_default_skips_key_request_and_cache_read(tmp_path):
+    api = Mock()
+    path = tmp_path / "camera_key.json"
+    path.write_text("not JSON: cache must not be read when decryption is off")
+    assert probe.camera_key(api, {}) is None
+    assert probe.cached_camera_key(api, {}, path) is None
+    assert probe.cached_camera_key(api, {"decrypt_video": False}, path) is None
+    api.get_cam_key.assert_not_called()
+    api.get_2fa_check_code.assert_not_called()

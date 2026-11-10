@@ -120,10 +120,10 @@ def remux_stream(stream, output, *, key, max_seconds, emit=print, video_mode="co
     process = subprocess.Popen(ffmpeg_command(video_mode), stdin=subprocess.PIPE,
                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     decryptor = BoundedDecryptor(key, codec=decrypt_mode) if key else None
-    checks = LocalChecks(key, emit)
     stats = {"packets": 0, "cloud_bytes": 0, "clear_bytes": 0, "ts_bytes": 0}
     errors = []
     flags = set()
+    checks = LocalChecks(key, emit, pipeline_flags=lambda: flags.copy())
     stopped = threading.Event()
     started = time.monotonic()
 

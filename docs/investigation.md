@@ -259,3 +259,36 @@ PES packets or 16 KiB) rather than locking onto a single short clear AUD. The re
 amd64 container also passed the full encrypted-media HTTP/decoder smoke test.
 All new media data used here was synthetic. The user's physical picture and the
 service's 5405 result remain pending a controlled user-side test after publication.
+
+## Confirmed cause and normal picture (0.2.3)
+
+The user supplied 0.2.2 logs selecting clear H.264 header size 1, showing equality
+with whole-capture decryption, but reporting PPS/slice/macroblock/reference errors
+in the processing pipeline. The compatible encoder's output check passed despite
+a grey picture: it was checking re-encoded output, not correctness of source data.
+No raw log attachment or private identifiers are stored in this repository.
+
+A local controlled reproduction showed that clear H.264 passed through and decoded
+normally, while applying the decryption transform to that same known-clear data
+caused codec errors. The owner then changed only `decrypt_video` to false, keeping
+compatible mode, and reported **Normal live picture**. This supports unnecessary
+local decryption as the cause for this user's DP1C cloud feed. The old default was
+an incorrect implementation assumption. Header-layout detection did not establish
+that the body was encrypted; metadata/key availability did not establish it either.
+
+Version 0.2.3 defaults to decryption off and the physically confirmed compatible
+output mode. Explicit encrypted modes remain supported for evidence-backed cases.
+Runtime fallbacks also default off; stale cached keys cannot reactivate decryption.
+Camera-key retrieval is skipped with decryption off. Existing configurations are
+preserved and documentation explicitly tells earlier users to change the flag.
+
+Output health summaries are scoped to encoded output and report observed pipeline
+errors alongside the frame/timestamp result. A normal picture is a user-reported
+observation, not inferred solely from those checks. Long-term playback, lower-CPU
+copy mode on this camera, sleep/wake behavior, and audio remain unverified.
+
+Release validation: all 53 unit tests passed. The clear-source smoke test decoded
+five frames with valid timestamps in both copy and compatible modes, and reproduced
+source codec errors with unnecessary decryption. The rebuilt amd64 image passed the
+encrypted-source authenticated HTTP/decoder regression as well, with encryption
+explicitly enabled. No source footage or credentials were uploaded or published.

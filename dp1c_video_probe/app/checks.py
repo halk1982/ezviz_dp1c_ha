@@ -25,13 +25,14 @@ def error_flags(stderr):
 def inspect_ts(data):
     """Probe a private in-memory sample, then require five actual decoded frames."""
     if len(data) < 188 * 3:
-        return {"status": "sample_too_short"}
+        return {"status": "sample_too_short", "scope": "encoded_output"}
     result = subprocess.run([
         "ffprobe", "-v", "error", "-f", "mpegts", "-i", "pipe:0", "-select_streams", "v:0",
         "-read_intervals", "%+#80", "-show_streams", "-show_packets", "-show_entries",
         "stream=codec_name,width,height,profile,pix_fmt:packet=pts,dts,dts_time,flags", "-of", "json",
     ], input=data, capture_output=True, timeout=10)
-    report = {"status": "probe_error", "probe_exit_code": result.returncode, "visual_quality": "not_assessed"}
+    report = {"status": "probe_error", "scope": "encoded_output",
+              "probe_exit_code": result.returncode, "visual_quality": "not_assessed"}
     if result.returncode:
         report["flags"] = error_flags(result.stderr)
         return report
@@ -86,11 +87,12 @@ def inspect_ts(data):
 
 class LocalChecks:
     """Once per producer: bounded samples, no files or media uploaded/logged."""
-    def __init__(self, key, emit, window_seconds=5, max_bytes=2 * 1024 * 1024):
+    def __init__(self, key, emit, window_seconds=5, max_bytes=2 * 1024 * 1024, pipeline_flags=None):
         self.key = key
         self.emit = emit
         self.window_seconds = window_seconds
         self.max_bytes = max_bytes
+        self.pipeline_flags = pipeline_flags or (lambda: set())
         self.raw = bytearray()
         self.clear = bytearray()
         self.ts = bytearray()
@@ -158,7 +160,13 @@ class LocalChecks:
         self.ts_done = True
         sample = bytes(self.ts)
         self.ts.clear()
-        self._launch("LIVE_CHECK", lambda: inspect_ts(sample))
+        def inspect():
+            result = inspect_ts(sample)
+            flags = sorted(self.pipeline_flags())
+            result["pipeline_error_flags"] = flags
+            result["pipeline_status"] = "errors_observed" if flags else "no_errors_observed"
+            return result
+        self._launch("LIVE_CHECK", inspect)
 
     def finish(self):
         self._compare()

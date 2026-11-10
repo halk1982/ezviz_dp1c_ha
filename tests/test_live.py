@@ -225,3 +225,30 @@ def test_auto_does_not_lock_on_a_short_clear_aud():
     aud = b"\0\0\1\xe0\0\x09\x80\0\0\0\0\0\1\x09\xf0"
     assert decryptor(aud) == b""
     assert decryptor._nalu_header_size is None
+
+
+def test_passthrough_ignores_a_saved_media_key(tmp_path, monkeypatch, capsys):
+    import io
+    import json
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from live import produce
+
+    options = tmp_path / "options.json"
+    auth = tmp_path / "live_auth.json"
+    options.write_text(json.dumps({"account": "fake", "password": "fake", "serial": "fake"}))
+    auth.write_text(json.dumps({"token": {}, "key": "OLD_PRIVATE_KEY", "identity": "fake"}))
+    api = SimpleNamespace(last_codes={}, export_token=lambda: {})
+    stream = Mock()
+    stream.__enter__ = Mock(return_value=stream)
+    stream.__exit__ = Mock(return_value=False)
+    stream.start.return_value = SimpleNamespace(result=0)
+    converter = Mock()
+    monkeypatch.setattr("live.remux_stream", converter)
+    assert produce(options, auth, output=io.BytesIO(), open_stream=lambda *a, **k: stream,
+                   client_factory=lambda *a, **k: api) == 0
+    assert converter.call_args.kwargs["key"] is None
+    assert converter.call_args.kwargs["video_mode"] == "compatible"
+    captured = capsys.readouterr()
+    assert "LIVE_DECRYPT_MODE: mode=disabled" in captured.err
+    assert "OLD_PRIVATE_KEY" not in captured.err

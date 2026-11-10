@@ -90,7 +90,7 @@ def persist_session(api, path, identity):
 
 
 def camera_key(api, options):
-    if not options.get("decrypt_video", True):
+    if not options.get("decrypt_video", False):
         return None
     if options.get("camera_key"):
         return options["camera_key"]
@@ -108,7 +108,7 @@ def camera_key(api, options):
 
 def cached_camera_key(api, options, path):
     """Cache only the resolved device key, tied to this account/region/device."""
-    if not options.get("decrypt_video", True):
+    if not options.get("decrypt_video", False):
         return None
     identity = hashlib.sha256((options["account"] + "@" + options["api_host"] + "/" + options["serial"]).encode()).hexdigest()
     if not options.get("camera_key") and path.exists():
@@ -145,7 +145,7 @@ def failure_hint(stage, error):
 def worker():
     os.umask(0o077)
     logging.disable(logging.CRITICAL)
-    print("PROBE: version=0.2.2", flush=True)
+    print("PROBE: version=0.2.3", flush=True)
     stage = "configuration"
     clip = Path("/media/ezviz_dp1c_probe/live-test.ts")
     api = None
@@ -173,7 +173,7 @@ def worker():
         api.save_clip(
             options["serial"], clip, source="cloud", output_format="mpegts",
             duration_seconds=10, max_packets=2000, timeout=15,
-            decrypt_video=options.get("decrypt_video", True),
+            decrypt_video=options.get("decrypt_video", False),
             media_key=key,
             nalu_header_size={"auto": None, "encrypted-header": 0, "h264-clear-header": 1, "hevc": 2}[options.get("decrypt_mode", "auto")],
         )

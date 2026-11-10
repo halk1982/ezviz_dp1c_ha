@@ -86,7 +86,7 @@ def make_fixture(directory, header_size=0):
         mismatch = next(i for i, (a, b) in enumerate(zip(decoded, expected)) if a != b)
         raise AssertionError(f"incremental decryption changed the synthetic video at byte {mismatch}; sizes={len(decoded)},{len(expected)}")
     (directory / "frames.json").write_text(json.dumps([frame.hex() for frame in frames]))
-    (directory / "options.json").write_text(json.dumps({"account": "synthetic", "password": "fake", "serial": "fake", "max_view_seconds": 30}))
+    (directory / "options.json").write_text(json.dumps({"account": "synthetic", "password": "fake", "serial": "fake", "max_view_seconds": 30, "decrypt_video": True}))
     (directory / "live_auth.json").write_text(json.dumps({"key": KEY, "identity": "synthetic", "token": {}}))
 
 

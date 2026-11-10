@@ -9,11 +9,19 @@ repository's **EZVIZ DP1C Cloud Video** add-on provides two modes:
 - `live`: an experimental authenticated, on-demand MPEG-TS endpoint for Home
   Assistant's **Generic Camera** integration, with one shared cloud connection.
 
-The probe identified **H.264, 1088 × 720** and returned decoded frames, but the
-user then reported a mostly grey image with occasional normal video. **Usable
-picture quality and sustained playback remain unresolved.** A decoder PASS is not
-proof that the image is correct.
-It does not use the legacy Internet Explorer player or local RTSP.
+The owner confirmed a **normal live DP1C picture** in Home Assistant's Generic
+Camera preview with:
+
+```yaml
+mode: live
+decrypt_video: false
+video_mode: compatible
+```
+
+The cloud video was already clear; unnecessary local decryption caused the earlier
+grey pictures. An encrypted motion image does not imply that live video requires
+decryption. Version **0.2.3** corrects the defaults. Existing configurations are
+preserved, so earlier installs must explicitly set `decrypt_video: false`.
 
 In Home Assistant OS, go to **Settings → Add-ons → Add-on Store → ⋮ → Repositories**
 and add:
@@ -22,13 +30,12 @@ and add:
 https://github.com/halk1982/ezviz_dp1c_ha
 ```
 
-Install **EZVIZ DP1C Cloud Video**, or update your existing **Cloud Video Probe**
-installation to **0.2.2** (same slug; configuration retained). Follow the
-[live-view setup instructions](dp1c_video_probe/DOCS.md) to enable live mode and add
-Generic Camera. The add-on does not create a camera entity automatically.
-If the Generic Camera browser preview reports media-content errors, version 0.2.2
-adds `video_mode: compatible` and local, privacy-preserving decode/timestamp checks.
-Compatible mode uses more CPU; the default `copy` mode preserves the camera bitstream.
+Install **EZVIZ DP1C Cloud Video** or update your existing **Cloud Video Probe**
+(same slug). Follow the [live-view setup instructions](dp1c_video_probe/DOCS.md) to
+add Generic Camera. The add-on does not create a camera entity automatically.
+Compatible mode uses CPU for encoding; a lower-CPU `copy` mode is available but
+has not yet been physically validated here with decryption off. Keep Preload stream
+disabled for this battery camera. Wake behavior and prolonged playback remain unverified.
 Credentials stay in your local configuration. Never upload them or footage here.
 
 ## Earlier snapshot/event prototype
@@ -151,3 +158,12 @@ For the targeted Home Assistant media-library compatibility check:
 
 This checks both video output modes with PyAV and fragmented MP4 settings from
 current Home Assistant source; it does not run Home Assistant or a real camera.
+
+The clear-video regression demonstrates the confirmed failure mechanism:
+
+```sh
+.venv/bin/python tests/passthrough_smoke.py
+```
+
+It verifies clear H.264 in both output modes and reproduces corruption when
+unnecessary decryption is applied. All media is synthetic.

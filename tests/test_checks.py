@@ -94,3 +94,17 @@ def test_decoded_frames_do_not_hide_invalid_timestamps(monkeypatch):
     assert report["status"] == "timestamp_error"
     assert report["timestamp_status"] == "anomalous"
     assert report["visual_quality"] == "not_assessed"
+
+
+def test_output_pass_does_not_hide_pipeline_errors(monkeypatch):
+    monkeypatch.setattr("checks.inspect_ts", lambda data: {"status": "pass", "scope": "encoded_output"})
+    messages = []
+    checks = LocalChecks(None, messages.append, window_seconds=0,
+                         pipeline_flags=lambda: {"missing_pps", "macroblock_decode_error"})
+    checks.output(b"x" * 600)
+    checks.finish()
+    report = json.loads(messages[0].split(": ", 1)[1])
+    assert report["status"] == "pass"
+    assert report["scope"] == "encoded_output"
+    assert report["pipeline_status"] == "errors_observed"
+    assert report["pipeline_error_flags"] == ["macroblock_decode_error", "missing_pps"]
