@@ -10,9 +10,17 @@ It is a one-shot experiment, not a working camera entity or permanent video serv
 2. `camera_key` is the device verification/encryption key, not your account password.
    Leave it empty initially: the upstream library attempts to obtain the key through
    your authenticated account. Keep `decrypt_video: true` for the first test.
-3. If EZVIZ sends a verification challenge, enter the received code in
-   `verification_code` and retry. Other challenge types may require further support.
-   Do not disable account security. Clear a successfully used code before a later test.
+3. Verification codes have **two different purposes**:
+   - `FAIL: stage=login error_class=EzvizAuthVerificationCode`: put the account-login
+     code in `verification_code` and retry. Clear it after login succeeds.
+   - `FAIL: stage=camera_key error_class=EzvizAuthVerificationCode`: put the newly
+     received camera-access code in `camera_verification_code`, leave
+     `verification_code` empty, and retry promptly. Preserve any leading zeros.
+   - `camera_key` is the permanent device encryption key, **not** an emailed code.
+     If you know that key, entering it avoids the cloud key-retrieval request.
+   The successful session is saved privately in `/data/session.json` for subsequent
+   attempts. Changing account or region starts a new session. Other challenge types
+   may require further support. Do not disable account security.
 4. Close live view in your phone app, then press **Start** on this add-on. It attempts
    a 10-second live capture and checks for decodable frames. It stops on completion,
    failure, or a two-minute overall timeout. **Stopped is expected.** Do not enable
@@ -41,3 +49,18 @@ stream endpoint and connection limits. Connect that stream to a Home Assistant
 camera entity (for example Generic Camera). Keep the existing HACS integration for
 motion and snapshots. A separate HACS integration is only needed if entity setup or
 camera-specific controls require it.
+
+## Updating from 0.1.0
+
+Refresh the add-on store/repositories and update this add-on to **0.1.1**. The old
+version incorrectly sent a code requested during camera-key retrieval to login.
+Clear the old `verification_code` first and run the updated probe once. If it now
+asks at `camera_key`, enter the fresh code in `camera_verification_code` and retry.
+The earlier generic login `PyEzvizError` does not establish that your password is wrong.
+
+A successful probe prints PASS and writes the private clip to
+`/media/ezviz_dp1c_probe/live-test.ts`. Browse **Media → My media** in Home Assistant
+(the label can vary) or access the media folder via Samba; download and open in VLC
+if the browser cannot play MPEG-TS. There is still no camera entity or live dashboard
+view. On failure, no validated clip is available; partial files are removed. A hard
+timeout may leave a partial file, which must not be treated as a successful capture.

@@ -84,3 +84,21 @@ Cloud image builds used temporary BuildKit CA mounts for this environment's HTTP
 proxy; published Dockerfiles use standard RUN instructions for Supervisor builder
 compatibility, without requiring BuildKit secrets. Runtime source and dependencies
 are identical. Supervisor and physical-camera tests remain unrun.
+
+## Verification-code correction (0.1.1)
+
+The user's first probe run logged successful login followed by
+`cloud_capture / EzvizAuthVerificationCode`. After an emailed code was entered in
+`verification_code`, the next run logged `login / PyEzvizError`. These logs contain
+no server response code and cannot establish the exact reason for the second failure.
+
+Source inspection identified a probe bug: `verification_code` was passed only to
+`login(sms_code=...)`. The library's cloud decrypt path separately calls
+`get_cam_key(serial, smscode=...)`, which raises `EzvizAuthVerificationCode` on result
+code 20002. Version 0.1.1 separates these inputs, fetches the key at an explicit
+`camera_key` stage, and supplies that key to capture. Successful login sessions are
+stored privately for the next attempt. No real user credentials were used here.
+
+Regression validation: 22 unit tests passed, including separate code routing,
+leading-zero preservation for camera-access codes, session reuse, and private token
+file permissions. Physical-device verification still requires the user's next run.

@@ -1,4 +1,5 @@
 """Bounded local compatibility test. Never print API payloads or credential values."""
+import hashlib
 import json
 import logging
 import os
@@ -30,6 +31,55 @@ def validate_clip(path):
     return {"codec": video.get("codec_name"), "width": video["width"], "height": video["height"], "decoded_frames": len(frames)}
 
 
+def authenticate(options, token_path):
+    """Reuse the login session when completing a separate camera-key challenge."""
+    identity = hashlib.sha256((options["account"] + "@" + options["api_host"]).encode()).hexdigest()
+    saved = json.loads(token_path.read_text()) if token_path.exists() else {}
+    token = saved.get("token") if saved.get("identity") == identity else None
+    login_code = options.get("verification_code")
+    # An explicitly supplied login code starts a fresh login challenge response.
+    if login_code:
+        token = None
+    api = EzvizClient(options["account"], options["password"], url=options["api_host"], timeout=15, token=token)
+    if not token:
+        api.login(sms_code=int(login_code) if login_code else None)
+    else:
+        print("INFO: reusing saved login session", flush=True)
+    persist_session(api, token_path, identity)
+    return api, identity
+
+
+def persist_session(api, path, identity):
+    temp = path.with_suffix(".tmp")
+    fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as stream:
+        json.dump({"identity": identity, "token": api.export_token()}, stream)
+    os.replace(temp, path)
+
+
+def camera_key(api, options):
+    if not options.get("decrypt_video", True):
+        return None
+    if options.get("camera_key"):
+        return options["camera_key"]
+    return api.get_cam_key(options["serial"], smscode=options.get("camera_verification_code") or None)
+
+
+def failure_hint(stage, error):
+    if type(error).__name__ == "EzvizAuthVerificationCode":
+        if stage == "camera_key":
+            return "Enter the new email code in camera_verification_code; leave verification_code empty. Or supply your known device encryption key in camera_key."
+        if stage == "login":
+            return "Enter the account-login code in verification_code. This is separate from camera_verification_code."
+    known = {
+        "The MFA code is invalid, please try again.": "The login verification code was rejected. Clear verification_code if the code was requested at camera_key stage.",
+        "Incorrect Username.": "Check the account name locally.",
+        "Incorrect Password.": "Check the account password locally.",
+        "The user is locked.": "The account is locked; stop retries and resolve this through EZVIZ.",
+    }
+    return known.get(str(error), "Share only the FAIL line; do not share credentials or raw API responses.")
+
+
 def worker():
     os.umask(0o077)
     logging.disable(logging.CRITICAL)
@@ -45,16 +95,19 @@ def worker():
         clip.unlink(missing_ok=True)
         stage = "login"
         print("STAGE: login", flush=True)
-        api = EzvizClient(options["account"], options["password"], url=options["api_host"], timeout=15)
-        code = options.get("verification_code")
-        api.login(sms_code=int(code) if code else None)
+        token_path = Path("/data/session.json")
+        api, identity = authenticate(options, token_path)
+        stage = "camera_key"
+        print("STAGE: camera_key", flush=True)
+        key = camera_key(api, options)
+        persist_session(api, token_path, identity)
         stage = "cloud_capture"
         print("STAGE: cloud_capture (up to 10 seconds of media)", flush=True)
         api.save_clip(
             options["serial"], clip, source="cloud", output_format="mpegts",
             duration_seconds=10, max_packets=2000, timeout=15,
             decrypt_video=options.get("decrypt_video", True),
-            media_key=options.get("camera_key") or None,
+            media_key=key,
         )
         stage = "video_decode"
         print("STAGE: video_decode", flush=True)
@@ -65,7 +118,9 @@ def worker():
     except Exception as error:
         # Exception bodies, URLs and serials are intentionally excluded.
         print(f"FAIL: stage={stage} error_class={type(error).__name__}", flush=True)
-        print("Keep any captured video private; share only the stage and error class.", flush=True)
+        clip.unlink(missing_ok=True)
+        print("HINT: " + failure_hint(stage, error), flush=True)
+        print("No validated clip was created. No camera entity is created by this probe.", flush=True)
         return 1
 
 

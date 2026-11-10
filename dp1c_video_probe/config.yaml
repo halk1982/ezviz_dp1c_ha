@@ -1,5 +1,5 @@
 name: EZVIZ DP1C Cloud Video Probe
-version: 0.1.0
+version: 0.1.1
 slug: ezviz_dp1c_video_probe
 description: One-shot experimental cloud live-video compatibility test; stops after testing
 url: https://github.com/halk1982/ezviz_dp1c_ha
@@ -17,6 +17,7 @@ options:
   serial: ""
   api_host: apiieu.ezvizlife.com
   verification_code: ""
+  camera_verification_code: ""
   camera_key: ""
   decrypt_video: true
 schema:
@@ -25,5 +26,6 @@ schema:
   serial: str
   api_host: str
   verification_code: password
+  camera_verification_code: password
   camera_key: password
   decrypt_video: bool

@@ -43,3 +43,43 @@ def test_probe_propagates_decode_failure(monkeypatch):
     monkeypatch.setattr(probe.subprocess, "run", runner)
     with pytest.raises(subprocess.CalledProcessError):
         probe.validate_clip(Path("test.ts"))
+
+
+def test_camera_code_sent_only_to_key_request(tmp_path, monkeypatch):
+    options = {"account": "test", "password": "fake", "serial": "device", "api_host": "apiieu.ezvizlife.com", "verification_code": "", "camera_verification_code": "001234", "camera_key": "", "decrypt_video": True}
+    api = Mock()
+    api.export_token.return_value = {"session_id": "fake-session", "rf_session_id": "fake-refresh"}
+    factory = Mock(return_value=api)
+    monkeypatch.setattr(probe, "EzvizClient", factory)
+    session = tmp_path / "session.json"
+    client, _ = probe.authenticate(options, session)
+    probe.camera_key(client, options)
+    api.login.assert_called_once_with(sms_code=None)
+    api.get_cam_key.assert_called_once_with("device", smscode="001234")
+    assert session.stat().st_mode & 0o777 == 0o600
+    api.reset_mock()
+    probe.authenticate(options, session)
+    api.login.assert_not_called()
+    assert factory.call_args.kwargs["token"]["session_id"] == "fake-session"
+
+
+def test_explicit_camera_key_skips_cloud_key_challenge():
+    api = Mock()
+    assert probe.camera_key(api, {"camera_key": "fake-key", "decrypt_video": True}) == "fake-key"
+    assert probe.camera_key(api, {"decrypt_video": False}) is None
+    api.get_cam_key.assert_not_called()
+
+
+def test_login_code_is_not_forwarded_to_camera_key(tmp_path, monkeypatch):
+    api = Mock()
+    api.export_token.return_value = {}
+    monkeypatch.setattr(probe, "EzvizClient", Mock(return_value=api))
+    options = {"account": "test", "password": "fake", "api_host": "apiieu.ezvizlife.com", "verification_code": "123456", "serial": "device"}
+    probe.authenticate(options, tmp_path / "session.json")
+    probe.camera_key(api, options)
+    api.login.assert_called_once_with(sms_code=123456)
+    api.get_cam_key.assert_called_once_with("device", smscode=None)
+
+
+def test_failure_hint_never_echoes_private_error():
+    assert "private-token" not in probe.failure_hint("login", Exception("private-token"))
