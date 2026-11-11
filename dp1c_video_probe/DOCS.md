@@ -28,21 +28,27 @@ installations retain their settings: if upgrading from an earlier version with
 4. Leave `verification_code`, `camera_verification_code` and `camera_key` empty for
    normal setup unless an explicit account-login challenge requires a login code.
    Decryption off skips camera-key retrieval and its device-encryption email flow.
-5. Save and Start. Wait for `LIVE: ready on port 8558, path /live.ts`.
+5. Save and Start. Wait for `LIVE: ready on port 8558`.
 6. Add **Generic Camera** under Settings → Devices & services:
 
    | Field | Value |
    |---|---|
    | Stream source | `http://HOME_ASSISTANT_LAN_IP:8558/live.ts` |
-   | Still image URL | Leave blank |
+   | Still image URL (0.2.4+) | `http://HOME_ASSISTANT_LAN_IP:8558/snapshot.jpg` |
    | Authentication | Basic |
    | Username | Your `stream_username` |
    | Password | Your `stream_password` |
 
    Use your HA machine's LAN IP and the mapped port in the add-on Network section.
+   On 0.2.3, leave Still image URL blank; that version has no JPEG endpoint.
    This version has no Ingress/Open Web UI player.
 7. Once the preview shows a normal picture, check **Everything looks good** and
    press **Submit**. Add the resulting camera entity to your dashboard.
+
+For an existing Generic Camera entity, open its configuration/reconfiguration and
+set the still-image URL above, retaining the stream source and Basic credentials.
+Disable **Use stream for stills** if that option is shown, so still requests use
+the JPEG endpoint instead of extracting images from the HA video stream.
 
 The endpoint uses HTTP Basic authentication on your trusted LAN. Do not port-forward
 it to the Internet. View remotely through Home Assistant's existing secured access.
@@ -66,6 +72,63 @@ it to the Internet. View remotely through Home Assistant's existing secured acce
 - Media timeout is 45 seconds. Errors cause a cooldown; a nonzero cloud start result
   causes a 120-second cooldown. Authentication challenges block producers until restart.
 - Only amd64 container builds were validated here. aarch64 is declared but not built here.
+
+## Still images and HomeKit (0.2.4+)
+
+`/snapshot.jpg` returns a JPEG from the current video feed, using the same Basic
+authentication as `/live.ts`. There are no new configuration fields. Requests
+share an existing cloud producer; when no video is running, a request starts one
+briefly. It stops after the normal idle timeout once the snapshot consumer leaves.
+
+- The last successful JPEG is cached **in memory for 30 seconds**. Concurrent
+  requests share one capture. Images are not saved to `/media`, `/data` or logs.
+- After the cache expires, the next request captures a new frame. It does not
+  silently return an old image if the camera is unavailable. Restart clears the cache.
+- A cold capture can take several seconds and times out after about 25 seconds.
+  Busy streams, cloud cooldowns, sleeping/unresponsive cameras or failed decoding
+  return HTTP 503. Client/HomeKit timeouts can be shorter than this limit.
+- Frequent HomeKit/dashboard thumbnail requests can start live video repeatedly
+  and use battery. The cache limits repeated captures within each 30-second window;
+  it does not make frequent thumbnail polling free. Keep Preload stream disabled.
+- This image is separate from the **last alarm image** supplied by your existing
+  HACS integration. Live-video decryption settings apply; an encrypted alarm image
+  is not a reason to enable live-video decryption.
+
+Keep the same Generic Camera entity exposed through **HomeKit Bridge**. The bridge
+should obtain still images through that entity; no add-on URL or password needs to
+be entered in Apple Home. This change does not add a doorbell event or two-way audio:
+keep your existing doorbell trigger configuration.
+
+Test on your installation before relying on it:
+
+1. Confirm the Generic Camera still preview shows a normal picture.
+2. Open Apple Home and check its thumbnail with live viewing closed.
+3. Change the scene, wait more than 30 seconds, then request another still and check
+   that it updates. Apple Home can retain its own thumbnail until it requests a new one.
+4. Press the doorbell and check the notification image and existing event behavior.
+5. Close all views and confirm `LIVE_STOP: reason=no_viewers` appears; watch battery
+   use over normal daily thumbnail refreshes.
+
+These Home Assistant, HomeKit, sleep/wake and battery checks need a physical camera.
+Local synthetic JPEG tests do not establish that they pass.
+
+## Everyday and advanced options
+
+For the confirmed DP1C setup, use `mode: live`, `video_mode: compatible`,
+`decrypt_video: false`, your account/password/serial/region and separate stream
+credentials. `max_view_seconds` bounds each producer's lifetime.
+
+Keep the remaining options for troubleshooting and other feeds rather than deleting
+them from existing installations: `mode: probe` is a diagnostic capture, `video_mode:
+copy` avoids re-encoding, and `decrypt_mode`, `camera_key` and
+`camera_verification_code` apply only when decryption is explicitly enabled.
+`verification_code` is needed only for an account-login challenge. Do not populate
+those fields for a normal clear-video setup.
+
+The HTTP server listens on `0.0.0.0` **inside the add-on container** so the mapped
+port can reach it. Binding it to container localhost would prevent Generic Camera
+from using that published port. Limit access using your LAN/firewall and Supervisor
+port settings; a container-localhost toggle is not a useful default here.
 
 ## Troubleshooting and logs
 
@@ -123,3 +186,5 @@ compatible mode. Local tests use synthetic media: clear/encrypted data, decode,
 timestamps, HTTP authentication, stream sharing and PyAV/fMP4 compatibility. They
 cannot establish every firmware/account behavior, visually correct scenes, prolonged
 playback, wake behavior, audio or unseen network conditions.
+JPEG extraction and its short cache are tested with synthetic video; HomeKit
+thumbnail/notification behavior has not yet been validated on the physical camera.

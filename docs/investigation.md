@@ -292,3 +292,37 @@ five frames with valid timestamps in both copy and compatible modes, and reprodu
 source codec errors with unnecessary decryption. The rebuilt amd64 image passed the
 encrypted-source authenticated HTTP/decoder regression as well, with encryption
 explicitly enabled. No source footage or credentials were uploaded or published.
+
+## Still-image endpoint and public documentation (0.2.4 development)
+
+The owner prioritized a still-image URL for the existing Generic Camera/HomeKit
+doorbell setup and chose fresh captures with a short cache. `/snapshot.jpg` uses
+the same Basic authentication as `/live.ts`, subscribes to the same bounded hub,
+and extracts one JPEG with FFmpeg. Concurrent requests share a capture; successful
+images are cached in memory for 30 seconds. Capture time, input size and JPEG size
+are bounded. Expired images are not substituted after failures, and neither JPEGs
+nor account data are written to public media paths by this endpoint.
+
+Synthetic validation: **64 tests passed**. The rebuilt amd64 video image passed
+startup import/tool checks, real FFprobe output-check flags, five-frame decode and
+invalid-media rejection, two-viewer live streaming, and the full encrypted-source
+producer-to-HTTP decoder test. Its JPEG smoke test verified concurrent authenticated
+requests, actual JPEG decoding, cache hits without starting a producer, a fresh
+capture sharing an active producer, and stalled-source timeout/cleanup. No EZVIZ
+credentials or physical-camera footage were used. Builds used temporary CA mounts
+for this cloud proxy, retaining TLS verification and the normal Supervisor Dockerfile.
+
+The owner approved MIT licensing for original project code. The README now leads
+with install instructions and a feature/validation table; the earlier MQTT bridge
+guide is retained separately. Advanced options are documented rather than removed
+from existing configurations. A container-localhost bind would prevent access via
+the published port, so no localhost toggle was added. Startup dependency checks and
+a credential-free HTTP 401 hint address the remaining diagnostic gaps. The existing
+explicit header-size-zero comparison regression still passes.
+
+At this validation point, 0.2.4 is a local change and has not been pushed or released.
+Physical DP1C still images, Home Assistant reconfiguration, Apple Home thumbnails
+and doorbell notification images, sleep/wake behavior, latency and battery impact
+remain unverified. Frequent thumbnail requests can repeatedly start live video
+after the cache expires. These checks should precede a stable snapshot release;
+audio/intercom remains a separate future feature.

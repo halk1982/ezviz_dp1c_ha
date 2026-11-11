@@ -18,6 +18,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pyezvizapi.exceptions import EzvizAuthVerificationCode
 from pyezvizapi.cloud_stream import open_cloud_stream
 from media import BoundedDecryptor, remux_stream
+from snapshot import Snapshots, SnapshotUnavailable
 
 from probe import DiagnosticClient, authenticate, cached_camera_key, failure_hint, persist_session
 
@@ -220,8 +221,9 @@ class Hub:
             self.thread.join(timeout=5)
 
 
-def handler_for(hub, username, password):
+def handler_for(hub, username, password, snapshots=None):
     expected = "Basic " + base64.b64encode(f"{username}:{password}".encode()).decode()
+    snapshots = snapshots if snapshots is not None else Snapshots(hub)
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *_):
@@ -231,10 +233,33 @@ def handler_for(hub, username, password):
             self.connection.settimeout(15)
             supplied = self.headers.get("Authorization", "")
             if not hmac.compare_digest(supplied.encode(), expected.encode()):
+                body = b"Authentication required. Use the add-on stream_username and stream_password with HTTP Basic authentication.\n"
                 self.send_response(401)
                 self.send_header("WWW-Authenticate", 'Basic realm="DP1C"')
-                self.send_header("Content-Length", "0")
+                self.send_header("Content-Type", "text/plain; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Cache-Control", "no-store")
                 self.end_headers()
+                try:
+                    self.wfile.write(body)
+                except OSError:
+                    pass
+                return
+            if self.path == "/snapshot.jpg":
+                try:
+                    image = snapshots.get()
+                except SnapshotUnavailable:
+                    self.send_error(503, "Snapshot unavailable; stream busy, cooling down, or camera not responding")
+                    return
+                try:
+                    self.send_response(200)
+                    self.send_header("Content-Type", "image/jpeg")
+                    self.send_header("Content-Length", str(len(image)))
+                    self.send_header("Cache-Control", "no-store")
+                    self.end_headers()
+                    self.wfile.write(image)
+                except OSError:
+                    pass  # Thumbnail clients may disconnect before capture finishes.
                 return
             if self.path != "/live.ts":
                 self.send_error(404)
@@ -291,7 +316,7 @@ def validate_options(options):
 def run(options):
     os.umask(0o077)
     logging.disable(logging.CRITICAL)
-    print("LIVE: version=0.2.3", flush=True)
+    print("LIVE: version=0.2.4", flush=True)
     stage = "live_configuration"
     auth_path = Path("/data/live_auth.json")
     try:
@@ -322,7 +347,7 @@ def run(options):
     stopped = threading.Event()
     for sig in (signal.SIGTERM, signal.SIGINT):
         signal.signal(sig, lambda *_: stopped.set())
-    print("LIVE: ready on port 8558, path /live.ts (authentication required); camera idle until viewed", flush=True)
+    print("LIVE: ready on port 8558, paths /live.ts and /snapshot.jpg (authentication required); camera idle until requested", flush=True)
     try:
         while not stopped.is_set():
             server.handle_request()

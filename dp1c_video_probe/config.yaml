@@ -1,7 +1,7 @@
 name: EZVIZ DP1C Cloud Video
-version: 0.2.3
+version: 0.2.4
 slug: ezviz_dp1c_video_probe
-description: Experimental on-demand cloud live video, with a separate capture-test mode
+description: Experimental cloud live video and JPEG snapshots, with a separate capture-test mode
 url: https://github.com/halk1982/ezviz_dp1c_ha
 arch:
   - amd64
@@ -14,7 +14,7 @@ map:
 ports:
   8558/tcp: 8558
 ports_description:
-  8558/tcp: Authenticated local MPEG-TS video
+  8558/tcp: Authenticated local MPEG-TS video and JPEG snapshots
 options:
   mode: probe
   video_mode: compatible

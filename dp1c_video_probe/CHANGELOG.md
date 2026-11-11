@@ -1,3 +1,12 @@
+# 0.2.4
+
+- Add authenticated `/snapshot.jpg` for Generic Camera's still-image URL and HomeKit thumbnail testing. Reuse the existing cloud producer, cache JPEGs in RAM for 30 seconds and share concurrent captures.
+- Bound capture time, input and JPEG size; release snapshot consumers/decoder processes after success or failure. Expired images are not returned on failure.
+- Check streaming imports, FFmpeg and FFprobe at add-on startup; give unauthenticated clients a Basic-authentication hint without exposing configured credentials.
+- Document the snapshot battery tradeoff, advanced options and physical-camera/HomeKit test steps. Preserve existing options, credentials and add-on slug.
+- Add an MIT license for original project code. Dependencies retain their respective licenses.
+- Snapshot behavior has local synthetic coverage; physical-camera/HomeKit validation is pending. No stable GitHub Release is claimed.
+
 # 0.2.3
 
 - Fix the confirmed DP1C grey-picture cause: live video was already clear and local decryption damaged it. Default to `decrypt_video: false`.

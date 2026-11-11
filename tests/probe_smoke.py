@@ -3,6 +3,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 from probe import validate_clip
+from checks import inspect_ts
 
 with tempfile.TemporaryDirectory() as directory:
     clip = Path(directory) / "test.ts"
@@ -12,6 +13,9 @@ with tempfile.TemporaryDirectory() as directory:
     ], check=True, capture_output=True, timeout=20)
     result = validate_clip(clip)
     assert result == {"codec": "h264", "width": 320, "height": 240, "decoded_frames": 5}, result
+    output_check = inspect_ts(clip.read_bytes())
+    assert output_check["status"] == "pass", output_check
+    assert output_check["decoded_frames"] == 5, output_check
     clip.write_bytes(b"not video")
     try:
         validate_clip(clip)
@@ -19,4 +23,4 @@ with tempfile.TemporaryDirectory() as directory:
         pass
     else:
         raise AssertionError("invalid video accepted")
-print("PASS: real FFmpeg/FFprobe decode five frames and reject invalid media")
+print("PASS: real FFmpeg/FFprobe decode five frames, verify runtime output-check flags, and reject invalid media")

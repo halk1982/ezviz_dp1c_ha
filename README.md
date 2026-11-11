@@ -1,104 +1,89 @@
-# EZVIZ DP1C Home Assistant experiments
+# EZVIZ DP1C for Home Assistant
 
-## Start here: live video
+Experimental Home Assistant OS add-ons for the EZVIZ DP1C door viewer. The main
+**Cloud Video** add-on provides on-demand cloud live video and JPEG still images
+for Home Assistant's **Generic Camera** integration.
 
-Keep your RenierM26 HACS integration for working motion and snapshots. This
-repository's **EZVIZ DP1C Cloud Video** add-on provides two modes:
+This is a community project, not an official EZVIZ or Home Assistant product.
 
-- `probe`: a short private capture and video-decode check, then stop.
-- `live`: an experimental authenticated, on-demand MPEG-TS endpoint for Home
-  Assistant's **Generic Camera** integration, with one shared cloud connection.
+## What works, and what is next?
 
-The owner confirmed a **normal live DP1C picture** in Home Assistant's Generic
-Camera preview with:
+| Feature | Status |
+|---|---|
+| Live video, clear passthrough + compatible encoding | Normal picture confirmed by the owner on their DP1C since 0.2.3 |
+| JPEG still-image endpoint | Added in 0.2.4; synthetic tests pass, physical-camera and HomeKit checks pending |
+| Motion and last alarm image | Keep your existing RenierM26 HACS integration |
+| Audio / intercom | Not implemented |
+| Wake from sleep, long-term playback, battery impact | Need physical-camera testing |
+| Architectures | amd64 tested; aarch64 declared, not validated here |
 
-```yaml
-mode: live
-decrypt_video: false
-video_mode: compatible
-```
+See the [changelog](dp1c_video_probe/CHANGELOG.md) and
+[investigation record](docs/investigation.md) for evidence and limitations.
 
-The cloud video was already clear; unnecessary local decryption caused the earlier
-grey pictures. An encrypted motion image does not imply that live video requires
-decryption. Version **0.2.3** corrects the defaults. Existing configurations are
-preserved, so earlier installs must explicitly set `decrypt_video: false`.
+## Install and get a picture
 
-In Home Assistant OS, go to **Settings → Add-ons → Add-on Store → ⋮ → Repositories**
-and add:
+1. In Home Assistant OS, open **Settings → Add-ons → Add-on Store → ⋮ → Repositories**
+   and add `https://github.com/halk1982/ezviz_dp1c_ha`.
+2. Install **EZVIZ DP1C Cloud Video**. Existing **Cloud Video Probe** installations
+   use the same slug and can update without replacing their configuration.
+3. Enter your EZVIZ account, password, camera serial and API region locally.
+   Choose a separate stream password, then use:
 
-```text
-https://github.com/halk1982/ezviz_dp1c_ha
-```
+   ```yaml
+   mode: live
+   decrypt_video: false
+   video_mode: compatible
+   ```
 
-Install **EZVIZ DP1C Cloud Video** or update your existing **Cloud Video Probe**
-(same slug). Follow the [live-view setup instructions](dp1c_video_probe/DOCS.md) to
-add Generic Camera. The add-on does not create a camera entity automatically.
-Compatible mode uses CPU for encoding; a lower-CPU `copy` mode is available but
-has not yet been physically validated here with decryption off. Keep Preload stream
-disabled for this battery camera. Wake behavior and prolonged playback remain unverified.
-Credentials stay in your local configuration. Never upload them or footage here.
+4. Follow the [Generic Camera setup guide](dp1c_video_probe/DOCS.md), including
+   Basic authentication. In 0.2.4+, use these URLs with your HA machine's LAN IP:
 
-## Earlier snapshot/event prototype
+   | Generic Camera field | URL |
+   |---|---|
+   | Stream source | `http://HOME_ASSISTANT_LAN_IP:8558/live.ts` |
+   | Still image URL | `http://HOME_ASSISTANT_LAN_IP:8558/snapshot.jpg` |
 
-The **Cloud Bridge** below is a separate prototype. It is not needed for the initial
-video test and mostly overlaps your existing HACS integration.
+   On **0.2.3**, leave Still image URL blank; it has no JPEG endpoint.
 
+**Upgrading from 0.2.2 or earlier:** explicitly set `decrypt_video: false` and
+restart. Existing options are preserved. The tested feed was already clear;
+unnecessary decryption caused the earlier grey pictures. Encrypted alarm images
+do not imply that live video needs decryption.
 
-A Home Assistant OS add-on prototype for **cloud alarm snapshots and events** via MQTT.
-It does not require local RTSP or the Internet Explorer player. It uses the existing
-`pyezvizapi` library, also used by Home Assistant's EZVIZ integration.
+Keep **Preload stream disabled** for this battery camera. JPEG requests cache a
+frame for 30 seconds, then can briefly start live video again. Frequent HomeKit
+thumbnail polling can therefore use more battery. Read the
+[HomeKit test steps](dp1c_video_probe/DOCS.md#still-images-and-homekit-024).
+Keep credentials and footage private; use the HTTP endpoints on your trusted LAN.
 
-**DP1C compatibility has not yet been tested against a real account/camera.**
-An installable container and synthetic tests do not establish that the DP1C publishes
-usable events or snapshots. Doorbell and motion codes deliberately have no defaults.
+## Which add-on should I use?
 
-First consider the built-in **EZVIZ** integration: its current development source
-already supports cloud motion images and motion status. Tell us what it exposes for
-your DP1C. This add-on is for validating and extending cloud event support.
+- **Cloud Video** is the current focus. `live` mode serves video/stills; `probe`
+  mode makes a short diagnostic capture and stops. Advanced decryption settings
+  remain available for feeds that actually need them.
+- **Cloud Bridge** is an earlier MQTT alarm/event prototype, separate from Cloud
+  Video. It mostly overlaps the existing HACS integration and has not been
+  physically validated. It is not needed for live video or `/snapshot.jpg`.
+  Its [configuration and limitations](docs/legacy-bridge.md) remain available.
 
-## Install on Home Assistant OS
+## Versions and releases
 
-Use the repository URL above for installation. For local testing, copy the `dp1c` directory into
-`/addons/ezviz_dp1c_cloud` on your Home Assistant host using Samba/SSH. Reload the
-add-on store, then install **EZVIZ DP1C Cloud Bridge** from Local add-ons.
+The add-on store reads `version` from the repository's add-on `config.yaml`; an
+installable version does not require a GitHub Release. The 0.2.3 version fixes the
+confirmed grey-picture issue. The 0.2.4 changes add still images for testing.
 
-1. Install/start the Mosquitto broker add-on and configure Home Assistant's MQTT integration.
-2. Open this add-on's Configuration tab. Enter your EZVIZ account/password, camera
-   serial, and MQTT credentials **there, not in chat or Git**.
-3. Leave `api_host: apiieu.ezvizlife.com` for an account in that EU region. If your
-   account uses a different EZVIZ API region, supply its correct hostname.
-4. Leave both code lists empty for the first run. Start the add-on and inspect its log.
-5. Home Assistant MQTT discovery should create a DP1C device with **Activity**, **Alarm
-   Code**, and **Snapshot** entities. Activity is an event entity: create an automation
-   triggered by its state change and inspect its `event_type` attribute.
-6. Follow [the local validation procedure](dp1c/DOCS.md). A doorbell press or movement
-   may be published as `unknown` until its observed code has been assigned.
+Test the Generic Camera still image, Apple Home thumbnail/doorbell notification,
+idle shutdown and battery behavior before promoting snapshot support as stable.
+Use a GitHub **prerelease** for an explicitly experimental testing milestone; a
+stable release should describe what was physically verified and its known limits.
+Do not treat an add-on version number or passing synthetic tests as evidence of
+full HomeKit support.
 
-## Behavior and limits
+## License and contributions
 
-- Default polling is 60 seconds, with exponential backoff to 15 minutes on errors.
-  Cloud delivery may add latency; this is not a real-time doorbell notification system.
-- First successful poll suppresses history but retrieves the latest available alarm
-  picture. On restart, events during downtime are deliberately not replayed.
-- Only timestamped messages for the configured serial are accepted. Events older
-  than `max_event_age` (180 seconds) or dated in the future are not emitted.
-- Up to five pages / 250 messages are read per poll. Older messages may be omitted.
-- Snapshots are the **last cloud alarm image**, not a fresh image on demand. A sleeping
-  camera is not forcibly woken. No device settings or encryption settings are changed.
-- Unknown event types stay unknown. Ring and movement may share a code; in that case
-  this version cannot distinguish them. Do not assign one code to both lists.
-- JPEG image URLs must use HTTPS and an allowed `image_hosts` suffix (default:
-  `ezvizlife.com`). Redirects are not followed. An image CDN on another domain needs
-  an explicitly verified host added locally. API session headers are not sent to CDNs.
-- Encrypted images require the device image verification/encryption key in `image_key`.
-  The key is used locally; encryption is not disabled.
-- MQTT event messages are not retained. Discovery, latest alarm code and snapshot are
-  retained by the broker. Protect MQTT credentials/access and enable MQTT TLS when
-  required. Broker retention means the latest image can survive add-on removal.
-- MQTT QoS 1 can redeliver messages; this is not an exactly-once alarm system.
-- Tokens are stored with owner-only permissions in `/data/token.json`; add-on backups
-  can contain credentials. Keep backups private. No credentials are embedded in code.
-- Only amd64 and aarch64 are declared; the current environment tests amd64 only.
+Original project code is licensed under [MIT](LICENSE). Third-party dependencies
+retain their own licenses. Bug reports should include the add-on/HA version and
+redacted diagnostic lines, never credentials, signed URLs, raw API responses or footage.
 
 ## Development
 
@@ -167,3 +152,13 @@ The clear-video regression demonstrates the confirmed failure mechanism:
 
 It verifies clear H.264 in both output modes and reproduces corruption when
 unnecessary decryption is applied. All media is synthetic.
+
+JPEG/HTTP smoke test (no EZVIZ credentials required):
+
+```sh
+.venv/bin/python tests/snapshot_smoke.py
+```
+
+It tests real JPEG decoding, concurrent requests, the short cache, sharing with an
+active producer, and timeout cleanup. The same script can run in the video image
+with the tests directory mounted at `/test` and `PYTHONPATH=/app`.
