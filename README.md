@@ -6,6 +6,8 @@ for Home Assistant's **Generic Camera** integration.
 
 This is a community project, not an official EZVIZ or Home Assistant product.
 
+For development handoffs and the immediate next task, read [PROJECT_STATE.md](PROJECT_STATE.md).
+
 ## What works, and what is next?
 
 | Feature | Status |
