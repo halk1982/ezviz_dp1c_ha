@@ -4,6 +4,9 @@ Last updated: 2026-11-14. Read this first when resuming in a new chat. Update it
 after meaningful changes or new camera-test results; keep detailed history in the
 changelog and investigation record.
 
+Repository: https://github.com/halk1982/ezviz-dp1c-ha. The previous
+`halk1982/ezviz_dp1c_ha` URL redirects to this renamed repository.
+
 ## Purpose and stack
 
 Integrate the EZVIZ DP1C door viewer with Home Assistant OS, primarily through the
